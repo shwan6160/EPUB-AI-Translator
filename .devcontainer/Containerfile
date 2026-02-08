@@ -1,0 +1,11 @@
+FROM fedora:latest
+
+RUN dnf update -y && \
+    dnf install -y git sudo curl wget which zsh util-linux-user shadow-utils && \
+    dnf clean all
+
+RUN useradd -m -s /bin/bash vscode && \
+    echo "vscode ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/NOPASSWD
+
+USER vscode
+WORKDIR /home/vscode

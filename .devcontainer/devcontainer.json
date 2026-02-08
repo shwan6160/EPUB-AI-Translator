@@ -1,0 +1,7 @@
+{
+    "name": "Fedora Devcontainer",
+    "build": {
+        "dockerfile": "Containerfile"
+    },
+    "remoteUser": "vscode"
+}
