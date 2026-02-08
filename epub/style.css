@@ -1,0 +1,23 @@
+p.korean_style {
+    color: #212529;
+    font-family: "RIDIBatang";
+    src: url('./fonts/RIDIBatang.otf') ;
+    font-size: 1.0em;
+    font-style: normal;
+    font-variant: normal;
+    font-weight: normal;
+    
+    line-height: 1.8;
+    
+    margin: 0;
+    orphans: 1;
+    
+    page-break-after: auto;
+    page-break-before: auto;
+    
+    text-align: justify;
+    text-decoration: none;
+    text-indent: 1.0em;
+    text-transform: none;
+    widows: 1;
+}
