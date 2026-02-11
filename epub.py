@@ -13,7 +13,12 @@ import colorama
 
 import utils
 from exceptions import *
- 
+
+
+class EPUB:
+    def __init__(self, epub_path: Path, output_dir: Path, opf: BeautifulSoup, xhtmls: list[element.Tag]):
+        self.epub_path = epub_path
+        self.output_dir = output_dir
 
 def extract_epub(epub_path: Path) -> dict:
     if not epub_path.exists() or not epub_path.is_file():
@@ -112,4 +117,59 @@ def extract_epub(epub_path: Path) -> dict:
 
     return data
 
+def trim_ruby_text(text: str) -> str:
+    """
+    텍스트에서 Ruby 주석을 trim합니다.
+    
+    :param text: `<ruby>한자<rt>후리가나</rt></ruby>`
+    :type text: str
+    :return: `한자 (Ruby: 후리가나)`
+    :rtype: str
+    """
+    ruby_pattern = re.compile(r'<ruby>(.*?)<rt>(.*?)</rt></ruby>')
+    def replace_ruby(match: re.Match) -> str:
+        kanji = match.group(1)
+        furigana = match.group(2)
+        return f"{kanji} (Ruby: {furigana})"
+    
+    return ruby_pattern.sub(replace_ruby, text)
+
+def text_from_epub(output_dir: Path, ordered_xhtml_files: list[element.Tag]) -> str:
+    """
+    EPUB에서 추출한 xhtml 파일 목록에서 텍스트를 추출합니다.
+    
+    :param output_dir: EPUB 추출 디렉토리
+    :type output_dir: Path
+    :param ordered_xhtml_files: 정렬된 xhtml 파일 목록
+    :type ordered_xhtml_files: list[element.Tag]
+    :return: 추출된 전체 텍스트
+    :rtype: str
+    """
+    full_text = ""
+
+    for item in ordered_xhtml_files:
+        href: str = str(item.get('href'))
+        if not href:
+            logging.warning("XHTML 파일의 href 속성이 없습니다. 건너뜁니다.")
+            continue
+        
+        xhtml_path = output_dir / href
+        if not xhtml_path.exists():
+            logging.warning(f"XHTML 파일을 찾을 수 없습니다: {xhtml_path}. 건너뜁니다.")
+            continue
+        
+        with xhtml_path.open('r', encoding='utf-8') as f:
+            xhtml_soup = BeautifulSoup(f, 'lxml')
+        
+        body = xhtml_soup.find('body')
+        if not body:
+            logging.warning(f"XHTML 파일에 body 태그가 없습니다: {xhtml_path}. 건너뜁니다.")
+            continue
+        
+        # body 내의 모든 텍스트 추출
+        text = body.get_text(separator='\n', strip=True)
+        text = trim_ruby_text(text)
+        full_text += text + "\n\n"
+    
+    return full_text.strip()
 
