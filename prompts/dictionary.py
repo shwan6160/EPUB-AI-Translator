@@ -1,4 +1,4 @@
-CHARACTER_DICT_PROMPT = """
+CHARACTER_DICT_SYSTEM_PROMPT = """
 당신은 일본 소설 내용을 분석하여 등장인물과 그룹 정보를 추출하고 구조화하는 전문가입니다. 제공된 일본 소설의 전체 텍스트를 분석하여 다음 지침에 따라 **새로운 캐릭터 사전(Character Dictionary)**을 JSON 형식으로 생성해주세요.
 
 ## 핵심 목표
@@ -67,7 +67,10 @@ CHARACTER_DICT_PROMPT = """
 * 유해하거나 부적절한 내용(PROHIBIT_CONTENT 언급 시 등)은 순화하거나 포함하지 마세요. 당신의 안전 가이드라인을 준수하세요.
 *출력은 반드시 유효한 JSON 형식이어야 하며, 다른 텍스트(설명, 인사말, 코드 마커 등)는 절대 포함하지 마세요.
 * 이제 아래에 제공될 소설 텍스트를 분석하여 캐릭터 사전을 JSON 형식으로 생성해주세요.
+"""
 
+
+CHARACTER_DICT_USER_PROMPT = """
 <source>
 {novel_text}
 </source>
