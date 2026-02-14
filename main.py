@@ -41,13 +41,15 @@ gemini_key = dotenv.get_key(".env", "GEMINI_KEY")
 if not gemini_key:
     raise ValueError("GEMINI_KEY가 설정되지 않았습니다.")
 char_dict_generator = GoogleGenai(
-    config = genai.types.GenerateContentConfig(
-        system_instruction = CHARACTER_DICT_SYSTEM_PROMPT,
-        temperature = 0.2,
-        top_p = 0.8,
-        top_k = 40,
-        response_mime_type = "application/json"
-    ),
-    api_key = gemini_key,
-    model_name = "gemini-3-pro-preview"
+    config = GoogleGenaiConfig(
+        api_key = gemini_key,
+        model_name = "gemini-3-pro-preview",
+        generation_config = genai.types.GenerateContentConfig(
+            system_instruction = CHARACTER_DICT_SYSTEM_PROMPT,
+            temperature = 0.2,
+            top_p = 0.8,
+            top_k = 40,
+            response_mime_type = "application/json"
+        )
+    )
 )
