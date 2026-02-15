@@ -40,6 +40,8 @@ epub_file_path = input("EPUB 파일 경로를 입력하세요: ")
 epub_extracted = extract_epub(Path(epub_file_path), get_workspace())
 full_text = load_full_text_from_epub(epub_extracted)
 
+provider_select = input("provider: ")
+
 if provider_select == "Google":
     key = get_api_key("GEMINI_KEY")
     if not key:
