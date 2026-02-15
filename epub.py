@@ -1,17 +1,11 @@
-import os
-import sys
 import re
 from pathlib import Path
 import zipfile
 import logging
-import json
 
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup, element
 
-import colorama
-
-import utils
 from exceptions import *
 
 
@@ -20,7 +14,7 @@ class EPUB:
         self.epub_path = epub_path
         self.output_dir = output_dir
 
-def extract_epub(epub_path: Path) -> dict:
+def extract_epub(epub_path: Path, workspace: Path) -> dict:
     if not epub_path.exists() or not epub_path.is_file():
         raise FileNotFoundError(f"EPUB 파일을 찾을 수 없습니다: {epub_path}")
     elif epub_path.suffix.lower() != '.epub':
@@ -28,10 +22,10 @@ def extract_epub(epub_path: Path) -> dict:
     
     # workspace 내에 epub 추출 디렉토리 생성
     counter = 1
-    output_dir = utils.get_workspace() / "extracted_epubs" / epub_path.stem
+    output_dir = workspace / "extracted_epubs" / epub_path.stem
     if output_dir.exists():
         while True:
-            new_output_dir = utils.get_workspace() / "extracted_epubs" / f"{epub_path.stem}({counter})"
+            new_output_dir = workspace / "extracted_epubs" / f"{epub_path.stem}({counter})"
             if not new_output_dir.exists():
                 output_dir = new_output_dir
                 break
@@ -60,8 +54,8 @@ def extract_epub(epub_path: Path) -> dict:
             :rtype: ResultSet[Tag]
             """
             
-            with opf_path.open('r', encoding='utf-8') as f:
-                opf_soup = BeautifulSoup(f, 'xml')
+            with opf_path.open('r', encoding='utf-8') as opf_file:
+                opf_soup = BeautifulSoup(opf_file, 'xml')
             
             # OPF 파일에서 manifest와 spine 가져오기
             manifest: element.Tag | None = opf_soup.find('manifest')
@@ -102,8 +96,8 @@ def extract_epub(epub_path: Path) -> dict:
         logging.info(f"Found OPF file: {opf_path}")
 
         # opf 파일 파싱
-        with opf_path.open('r', encoding='utf-8') as f:
-            opf_soup = BeautifulSoup(f, 'xml')
+        with opf_path.open('r', encoding='utf-8') as opf_file:
+            opf_soup = BeautifulSoup(opf_file, 'xml')
         
         xhtml_files = get_xhtml_files_from_opf(opf_path)
         if not xhtml_files: 
@@ -111,8 +105,23 @@ def extract_epub(epub_path: Path) -> dict:
 
         logging.info(f"Found {len(xhtml_files)} XHTML files in OPF.")
 
+        # OPF 파일의 zip 내 상위 디렉토리 (href 해석 기준)
+        opf_parent = Path(opf_path.at).parent
+
+        # unzip result to output_dir
+        for member in f.namelist():
+            member_path = output_dir / member
+            if member.endswith('/'):
+                member_path.mkdir(parents=True, exist_ok=True)
+            else:
+                member_path.parent.mkdir(parents=True, exist_ok=True)
+                with f.open(member) as source, open(member_path, 'wb') as target:
+                    target.write(source.read())
+
     data: dict = {
-        "output_dir": output_dir
+        "output_dir": output_dir,
+        "opf_dir": opf_parent,
+        "xhtml_files": xhtml_files
     }
 
     return data
@@ -134,7 +143,7 @@ def trim_ruby_text(text: str) -> str:
     
     return ruby_pattern.sub(replace_ruby, text)
 
-def text_from_epub(output_dir: Path, ordered_xhtml_files: list[element.Tag]) -> str:
+def text_from_epub(output_dir: Path, ordered_xhtml_files: list[element.Tag], opf_dir: Path = Path('.')) -> str:
     """
     EPUB에서 추출한 xhtml 파일 목록에서 텍스트를 추출합니다.
     
@@ -142,6 +151,8 @@ def text_from_epub(output_dir: Path, ordered_xhtml_files: list[element.Tag]) -> 
     :type output_dir: Path
     :param ordered_xhtml_files: 정렬된 xhtml 파일 목록
     :type ordered_xhtml_files: list[element.Tag]
+    :param opf_dir: OPF 파일이 위치한 zip 내 상위 디렉토리 (href 해석 기준)
+    :type opf_dir: Path
     :return: 추출된 전체 텍스트
     :rtype: str
     """
@@ -153,13 +164,13 @@ def text_from_epub(output_dir: Path, ordered_xhtml_files: list[element.Tag]) -> 
             logging.warning("XHTML 파일의 href 속성이 없습니다. 건너뜁니다.")
             continue
         
-        xhtml_path = output_dir / href
+        xhtml_path = output_dir / opf_dir / href
         if not xhtml_path.exists():
             logging.warning(f"XHTML 파일을 찾을 수 없습니다: {xhtml_path}. 건너뜁니다.")
             continue
         
         with xhtml_path.open('r', encoding='utf-8') as f:
-            xhtml_soup = BeautifulSoup(f, 'lxml')
+            xhtml_soup = BeautifulSoup(f, 'xml')
         
         body = xhtml_soup.find('body')
         if not body:
