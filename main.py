@@ -28,11 +28,12 @@ from google import genai
 from epub import *
 from provider import *
 from prompts.dictionary import *
+from utils import *
 
 #epub 함수 사용 작업중
 epub_file_path = input("EPUB 파일 경로를 입력하세요: ")
 
-epub = extract_epub(Path(epub_file_path))
+epub = extract_epub(Path(epub_file_path), get_workspace())
 
 full_text = trim_ruby_text(text_from_epub(epub["output_dir"], epub["xhtml_files"]))
 
