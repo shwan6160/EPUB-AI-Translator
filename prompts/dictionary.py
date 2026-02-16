@@ -56,6 +56,7 @@ CHARACTER_DICT_SYSTEM_PROMPT = """
     }}
   ]
 }}
+```
 
 ## 주의 사항
 * 소설 전체 내용을 바탕으로 최대한 정확하고 상세하게 정보를 추출해주세요.
@@ -69,11 +70,157 @@ CHARACTER_DICT_SYSTEM_PROMPT = """
 """
 
 
-CHARACTER_DICT_USER_PROMPT = """
+CHARACTER_DICT_USER_PROMPT = """<instruction>
+위 시스템 지침에 따라 아래 <source>의 텍스트를 분석하여 JSON 캐릭터 사전을 작성하세요.
+반드시 JSON 데이터만 출력하고 다른 말은 덧붙이지 마세요.
+</instruction>
+
 <source>
 {novel_text}
 </source>
 """
+
+JSON_SCHEMA = """
+{{
+  "characters": [
+    {{
+      "id": "character_XXX",
+      "name_original": "...",
+      "name_translated": "...",
+      "gender": "...",
+      "description": "...",
+      "nicknames": [
+        {{ "original": "...", "translated": "..." }}
+      ],
+      "speaking_style": "...",
+      "relationships": [
+        {{ "target": "character_YYY", "relation": "..." }}
+      ],
+      "groups": ["group_ZZZ"]
+    }}
+  ],
+  "groups": [
+    {{
+      "group_id": "group_ZZZ",
+      "type": "...",
+      "name_original": "...",
+      "name_translated": "...",
+      "members": ["character_XXX"]
+    }}
+  ]
+}}
+"""
+
+CHARACTER_DICT_SYSTEM_PROMPT_QWEN ="""
+<role>
+당신은 일본 소설 내용을 분석하여 등장인물과 그룹 정보를 추출하고 구조화하는 전문가입니다. 
+</role>
+
+<task>
+제공된 일본 소설의 전체 텍스트를 분석하여 다음 지침에 따라 **새로운 캐릭터 사전(Character Dictionary)**을 JSON 형식으로 생성해주세요.
+</task>
+
+<objective>
+1. 소설에 등장하는 주요 인물과 그룹을 식별합니다.
+2. 각 인물과 그룹에 대한 상세 정보(이름, 성별, 설명, 관계 등)를 정확하게 추출하고 한국어로 번역합니다.
+3. 본 캐릭터 사전을 이용해서 번역 시 활용 가능한 내용을 캐릭터 사전에 추가합니다. 번역에 불필요한 내용들은 최소화 합니다.
+4. 결과를 지정된 JSON 형식에 맞춰 **유효한 JSON 데이터만** 출력합니다. **JSON 외의 설명, 인사말, 코드 블록 마커(```json ... ```) 등은 절대 포함하지 마세요.**
+</objective>
+
+<guidelines>
+<characters>
+- `id`: 각 인물을 고유하게 식별하는 ID를 생성합니다 (예: "character_001", "character_002").
+- `name_original`: 인물의 일본어 원 이름 (한자 또는 가타카나 포함)을 정확히 기입합니다. 가장 일반적으로 사용되는 전체 이름을 기준으로 합니다. **`漢字 (Ruby: かんじ)` 형식의 텍스트가 있다면 괄호 앞의 원문(예: `漢字`)을 사용합니다.**
+- `name_translated`: `name_original`을 자연스러운 한국어 발음 또는 표기로 번역하여 기입합니다. **Ruby 정보가 있다면 발음 번역에 참고합니다.**
+- `gender`: 인물의 성별을 "남성", "여성", 또는 "알 수 없음"으로 추론하여 기입합니다. 명확하지 않으면 "알 수 없음"으로 합니다.
+- `description`: 소설 내용에 기반하여 인물의 역할, 직업, 특징, 주요 행적 등을 한국어로 요약하여 설명합니다. 다른 캐릭터와의 호칭 방식 변화 등 중요한 특징도 포함합니다.
+- `nicknames` (배열, 선택 사항): 인물의 별명이나 다르게 불리는 이름이 있다면, `original` (일본어 원문)과 `translated` (한국어 번역) 쌍으로 추가합니다. 성(姓)이나 이름(名)만 불리는 경우도 포함합니다. **`漢字 (Ruby: かんじ)` 형식의 텍스트가 있다면 괄호 앞의 원문을 original로 사용합니다.**
+- `speaking_style`: (선택 사항) 인물의 독특한 말투나 언어 습관이 있다면 한국어로 간략히 기술합니다. 비워둘 수 있습니다.
+- `relationships` (배열, 선택 사항): 다른 인물과의 관계를 `target` (대상 인물의 `id`)과 `relation` (관계를 한국어로 설명, 예: "친구", "연인", "의붓오빠", "라이벌", "짝사랑 대상") 쌍으로 추가합니다.
+- `groups` (배열, 선택 사항): 인물이 소속된 그룹의 `group_id` 목록을 추가합니다.
+</characters>
+    
+<groups>
+- `group_id`: 각 그룹을 고유하게 식별하는 ID를 생성합니다 (예: "family_001", "school_001").
+- `type`: 그룹의 유형을 나타내는 소문자 문자열 (예: "family", "school", "company", "club", "part_time_job", "organization").
+- `name_original`: 그룹의 일본어 원 이름 (있을 경우)을 기입합니다. 없으면 빈 문자열로 둡니다. **`漢字 (Ruby: かんじ)` 형식의 텍스트가 있다면 괄호 앞의 원문을 사용합니다.**
+- `name_translated`: `name_original`을 한국어로 번역하여 기입합니다. 원 이름이 없으면 빈 문자열로 둡니다. **Ruby 정보가 있다면 발음 번역에 참고합니다.**
+- `members`: 해당 그룹에 속한 인물들의 `id` 목록을 배열로 추가합니다.
+</groups>
+</guidelines>
+    
+<schema>
+{{
+  "characters": [
+    {{
+      "id": "character_XXX",
+      "name_original": "...",
+      "name_translated": "...",
+      "gender": "...",
+      "description": "...",
+      "nicknames": [
+        {{ "original": "...", "translated": "..." }}
+      ],
+      "speaking_style": "...",
+      "relationships": [
+        {{ "target": "character_YYY", "relation": "..." }}
+      ],
+      "groups": ["group_ZZZ"]
+    }}
+  ],
+  "groups": [
+    {{
+      "group_id": "group_ZZZ",
+      "type": "...",
+      "name_original": "...",
+      "name_translated": "...",
+      "members": ["character_XXX"]
+    }}
+  ]
+}}
+</schema>
+
+<rules>
+- 소설 전체 내용을 바탕으로 최대한 정확하고 상세하게 정보를 추출해주세요.
+- 정확한 이름이 나온 인물만 추출합니다. ('누구의 엄마', '할아버지' 등 대명사나 단순 호칭은 인물로 생성하지 않습니다.)
+- 주인공과 주요 조연 위주로 추출하고, 비중이 매우 낮은 단역/엑스트라는 제외합니다.
+- 텍스트에 漢字 (Ruby: かんじ) 형식이 있다면, 이름(name_original, nicknames의 original)에는 괄호 앞 원문(漢字)을 사용하고, 발음(かんじ)은 번역(name_translated 등)과 설명에 참고하세요.
+- 이름 번역은 한국어 독자에게 자연스러운 표기를 사용해주세요.
+- 관계 설명은 명확하고 구체적으로 작성해주세요. 예: "친구" 대신 "어릴 적부터 친한 친구", "의붓오빠" 대신 "어머니의 재혼으로 생긴 의붓오빠" 등.
+- 출력은 반드시 유효한 JSON 형식이어야 하며, 다른 텍스트(설명, 인사말, 코드 마커 등)는 절대 포함하지 마세요.
+- 이제 아래에 제공될 소설 텍스트를 분석하여 캐릭터 사전을 JSON 형식으로 생성해주세요.
+</rules>
+"""
+
+CHARACTER_DICT_USER_PROMPT_QWEN = """
+<task_instruction>
+아래 <source_text>를 분석하여 지침에 맞는 캐릭터 사전을 생성하세요. 
+정확한 이름이 있는 주요 인물(주인공 및 주요 조연) 위주로 추출하고, 비중이 낮은 단역은 제외하십시오.
+</task_instruction>
+
+<source_text>
+{novel_text}
+</source_text>
+"""
+
+CHARACTER_DICT_PROMPT = {
+    "system": {
+        "role": "당신은 일본 소설 내용을 분석하여 등장인물과 그룹 정보를 추출하고 구조화하는 전문가입니다.",
+        "task": "제공된 일본 소설의 전체 텍스트를 분석하여 다음 지침에 따라 새로운 캐릭터 사전(Character Dictionary)을 JSON 형식으로 생성하십시오.",
+        "objective": [
+            "소설에 등장하는 주요 인물과 그룹을 식별합니다.",
+            "각 인물과 그룹에 대한 상세 정보(이름, 성별, 설명, 관계 등)를 정확하게 추출하고 한국어로 번역합니다.",
+            "본 캐릭터 사전을 이용해서 번역 시 활용 가능한 내용을 캐릭터 사전에 추가합니다. 번역에 불필요한 내용들은 최소화 합니다.",
+            "결과를 지정된 JSON 형식에 맞춰 유효한 JSON 데이터만 출력합니다. JSON 외의 설명, 인사말, 코드 블록 마커(```json ... ```) 등은 절대 포함하지 마세요."
+        ],
+        "guidelines": {
+            "characters": [],
+            "groups": []
+        },
+        "output_format": JSON_SCHEMA,
+    },
+    "user": CHARACTER_DICT_USER_PROMPT
+}
 
 
 UPDATE_CHARACTER_DICT_PROMPT = """

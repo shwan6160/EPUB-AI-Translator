@@ -93,11 +93,18 @@ elif provider_select == "OpenRouter":
             raise ValueError("API 키가 설정되지 않았습니다.")
     
     model = input("사용할 모델 이름을 입력하세요: ")
+    system_prompt = CHARACTER_DICT_SYSTEM_PROMPT
+    user_prompt = CHARACTER_DICT_USER_PROMPT.format(novel_text=full_text)
+
+    if model == "qwen/qwen3-max-thinking":
+        system_prompt = CHARACTER_DICT_SYSTEM_PROMPT_QWEN
+        user_prompt = CHARACTER_DICT_USER_PROMPT_QWEN.format(novel_text=full_text)
+
     provider = OpenRouter(
         config=OpenRouterConfig(
             api_key=key,
             model_name=model,
-            system_prompt=CHARACTER_DICT_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             temperature=0.2,
             top_p=0.8,
             response_format={"type": "json_object"},
@@ -106,7 +113,7 @@ elif provider_select == "OpenRouter":
     )
 
     response_text = provider.generate_content(
-        user_prompt=CHARACTER_DICT_USER_PROMPT.format(novel_text=full_text)
+        user_prompt=user_prompt
     )
     char_dict = parse_dictionary_json(response_text)
 
