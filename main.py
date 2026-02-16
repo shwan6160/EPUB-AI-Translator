@@ -142,9 +142,7 @@ elif char_dict is None:
     print("알 수 없는 모델 제공자입니다.")
     char_dict = None
 
-# ===========================
-# Step 2: EPUB 번역 및 패키징
-# ===========================
+# EPUB 번역
 if char_dict is not None:
     proceed = input("\njson 파일을 검토 후 번역하십시오.\nEPUB 번역을 진행하시겠습니까? (y/n): ").strip().lower()
     if proceed == 'y':
@@ -167,20 +165,7 @@ if char_dict is not None:
 
         # 캐릭터 사전을 시스템 프롬프트에 포함
         char_dict_text = json.dumps(char_dict, ensure_ascii=False, indent=2)
-        translation_system_prompt = base_prompt_instructions + f"""
-
-## 번역 출력 형식
-입력 텍스트의 각 줄은 `[번호] 텍스트` 형식으로 구성되어 있습니다.
-번역 시 반드시 동일한 `[번호]` 마커를 유지하고, 각 번호에 해당하는 텍스트만 번역하세요.
-
-예시:
-입력: [0] 彼女は静かに微笑んだ。
-출력: [0] 그녀는 조용히 미소 지었다.
-
-## 캐릭터 사전
-다음은 이 소설의 등장인물 정보입니다. 번역 시 이름과 호칭에 참고하세요.
-{char_dict_text}
-"""
+        translation_system_prompt = base_prompt_instructions.format(char_dict_text=char_dict_text)
 
         translation_provider = GoogleGenai(
             config=GoogleGenaiConfig(
