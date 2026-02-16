@@ -41,14 +41,27 @@ epub_file_path = input("EPUB 파일 경로를 입력하세요: ")
 epub_extracted = extract_epub(Path(epub_file_path), get_workspace())
 full_text = load_full_text_from_epub(epub_extracted)
 
-provider_select = input("provider: ")
-
 key = ""
 model = ""
 char_dict = None
 char_dict_path = get_workspace() / Path(epub_file_path).with_name(f"{Path(epub_file_path).stem}_character_dictionary.json")
 
-if provider_select == "Google":
+# 기존 캐릭터 사전 JSON이 있으면 로드 시도
+if char_dict_path.exists():
+    try:
+        with open(char_dict_path, "r", encoding="utf-8") as f:
+            char_dict = json.load(f)
+        # parse_dictionary_json 검증 로직 재활용 (characters, groups 키 확인)
+        parse_dictionary_json(json.dumps(char_dict, ensure_ascii=False))
+        print(f"기존 캐릭터 사전을 로드했습니다: {char_dict_path}")
+    except Exception as e:
+        print(f"기존 캐릭터 사전 로드 실패: {e}")
+        char_dict = None
+
+if char_dict is None:
+    provider_select = input("provider: ")
+
+if char_dict is None and provider_select == "Google":
     key = get_api_key("GEMINI_KEY")
     if not key:
         print("GEMINI_KEY가 설정되지 않았습니다. API 키를 입력해 주십시오.")
@@ -90,7 +103,7 @@ if provider_select == "Google":
     with open(char_dict_path, "w", encoding="utf-8") as f:
         json.dump(char_dict, f, ensure_ascii=False, indent=2)
 
-elif provider_select == "OpenRouter":
+elif char_dict is None and provider_select == "OpenRouter":
     key = get_api_key("OPENROUTER_KEY")
     if not key:
         print("OPENROUTER_KEY가 설정되지 않았습니다. API 키를 입력해 주십시오.")
@@ -125,7 +138,7 @@ elif provider_select == "OpenRouter":
     with open(char_dict_path, "w", encoding="utf-8") as f:
         json.dump(char_dict, f, ensure_ascii=False, indent=2)
 
-else:
+elif char_dict is None:
     print("알 수 없는 모델 제공자입니다.")
     char_dict = None
 
