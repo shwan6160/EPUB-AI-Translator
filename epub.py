@@ -1,9 +1,13 @@
 import re
+from urllib.parse import quote, unquote
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Callable
 import zipfile
 import logging
+import concurrent.futures
+
+from tqdm import tqdm
 
 from bs4 import BeautifulSoup, element
 from bs4.element import NavigableString, Tag
@@ -30,6 +34,15 @@ _JP_INLINE_UNWRAP_CLASSES = {'koboSpan', 'tcy', 'upright'}
 _PRESERVE_INLINE_CLASSES = {'em-sesame', 'bold', 'italic'}
 _BLOCK_TAGS = frozenset({'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'li'})
 _INLINE_MARKER_RE = re.compile(r'<<([a-zA-Z0-9_-]+):(.+?)>>')
+_INLINE_ATTR_SEP = "||"
+
+
+def _encode_marker_value(value: str) -> str:
+    return quote(value, safe="")
+
+
+def _decode_marker_value(value: str) -> str:
+    return unquote(value)
 
 
 def simplify_dom(body: Tag) -> None:
@@ -82,6 +95,21 @@ def _extract_text_with_inline_markers(elem: Tag) -> str:
         if isinstance(child, NavigableString):
             parts.append(str(child))
         elif isinstance(child, Tag):
+            if child.name == 'a':
+                href = child.get('href', '') or ''
+                anchor_id = child.get('id', '') or ''
+                cls_list = child.get('class', [])
+                cls_text = " ".join(cls_list) if isinstance(cls_list, list) else str(cls_list)
+                inner_text = child.get_text()
+                attrs = [
+                    f"href={_encode_marker_value(href)}",
+                    f"id={_encode_marker_value(anchor_id)}",
+                    f"class={_encode_marker_value(cls_text)}",
+                    f"text={_encode_marker_value(inner_text)}",
+                ]
+                parts.append(f"<<a:{_INLINE_ATTR_SEP.join(attrs)}>>")
+                continue
+
             cls_list = child.get('class', [])
             cls_set = set(cls_list) if isinstance(cls_list, list) else {cls_list} if cls_list else set()
             marker_cls = cls_set & _PRESERVE_INLINE_CLASSES
@@ -250,28 +278,32 @@ def parse_translated_chunk(translated_text: str, chunk: list[TextSegment]) -> di
 
 def translate_and_inject(
     segments: list[TextSegment],
-    translate_fn: Callable[[str], str],
-    max_chars: int = 2000,
+    translate_fn: Callable[[str, str], str],
+    max_chars: int = 8000,
 ) -> None:
     """
     세그먼트를 청킹하여 번역하고, 스켈레톤 DOM에 번역문을 재삽입합니다.
     
     내부적으로 chunk_segments → build_chunk_text → translate_fn →
     parse_translated_chunk → _inject_translations 순서로 진행됩니다.
+    파일 내 chunk간 이전 문맥(prev_context)을 자동으로 전달합니다.
     
     :param segments: extract_segments()로 추출된 전체 세그먼트 리스트
-    :param translate_fn: def translation(text_chunk: str) -> str 형태의 번역 함수
+    :param translate_fn: def translation(text_chunk: str, prev_context: str) -> str 형태의 번역 함수
     :param max_chars: chunk 최대 글자 수
     """
     chunks = chunk_segments(segments, max_chars)
+    prev_context = ""
 
     for chunk in chunks:
         chunk_text = build_chunk_text(chunk)
-        translated = translate_fn(chunk_text)
+        translated = translate_fn(chunk_text, prev_context)
         mapping = parse_translated_chunk(translated, chunk)
 
         for seg in chunk:
             seg.translated_text = mapping.get(seg.index, seg.original_text)
+
+        prev_context = chunk_text
 
     _inject_translations(segments)
 
@@ -301,12 +333,31 @@ def _inject_translations(segments: list[TextSegment]) -> None:
                 elif i % 3 == 1:
                     cls_name = parts[i]
                     inner = parts[i + 1] if i + 1 < len(parts) else ""
-                    span_soup = BeautifulSoup(
-                        f'<span class="{cls_name}">{inner}</span>', 'html.parser'
-                    )
-                    new_span = span_soup.find('span')
-                    if new_span:
-                        seg.element.append(new_span)
+                    if cls_name == 'a':
+                        attrs = {}
+                        for item in inner.split(_INLINE_ATTR_SEP):
+                            if "=" not in item:
+                                continue
+                            key, value = item.split("=", 1)
+                            attrs[key] = _decode_marker_value(value)
+                        anchor_text = attrs.pop("text", "")
+                        anchor = BeautifulSoup("", 'html.parser').new_tag("a")
+                        if attrs.get("href"):
+                            anchor["href"] = attrs["href"]
+                        if attrs.get("id"):
+                            anchor["id"] = attrs["id"]
+                        if attrs.get("class"):
+                            anchor["class"] = attrs["class"].split()
+                        if anchor_text:
+                            anchor.append(NavigableString(anchor_text))
+                        seg.element.append(anchor)
+                    else:
+                        span_soup = BeautifulSoup(
+                            f'<span class="{cls_name}">{inner}</span>', 'html.parser'
+                        )
+                        new_span = span_soup.find('span')
+                        if new_span:
+                            seg.element.append(new_span)
                     i += 1
                 i += 1
 
@@ -341,9 +392,9 @@ def postprocess_xhtml(soup: BeautifulSoup, target_lang: str = "ko") -> None:
 
 def translate_xhtml(
     xhtml_path: Path,
-    translate_fn: Callable[[str], str],
+    translate_fn: Callable[[str, str], str],
     target_lang: str = "ko",
-    max_chars: int = 2000,
+    max_chars: int = 8000,
 ) -> str:
     """
     단일 XHTML 파일을 번역하여 구조가 보존된 XHTML 문자열을 반환합니다.
@@ -352,7 +403,7 @@ def translate_xhtml(
     파이프라인을 순차 실행합니다.
     
     :param xhtml_path: 원본 XHTML 파일 경로
-    :param translate_fn: def translation(text_chunk: str) -> str 형태의 번역 함수
+    :param translate_fn: def translation(text_chunk: str, prev_context: str) -> str 형태의 번역 함수
     :param target_lang: 번역 대상 언어 코드
     :param max_chars: 번역기 1회 호출 당 최대 글자 수
     :returns: 번역된 XHTML 문자열
@@ -382,21 +433,24 @@ def translate_xhtml(
 def translate_epub(
     epub_path: Path,
     workspace: Path,
-    translate_fn: Callable[[str], str],
+    translate_fn: Callable[[str, str], str],
     target_lang: str = "ko",
-    max_chars: int = 2000,
+    max_chars: int = 8000,
+    max_workers: int = 10,
 ) -> Path:
     """
     EPUB 파일 전체를 번역합니다.
     
     extract_epub()으로 추출 후, 각 XHTML 파일에 translate_xhtml()을 적용하고
     번역 결과를 추출 디렉토리에 덮어씁니다.
+    max_workers > 1이면 XHTML 파일을 병렬로 번역합니다.
     
     :param epub_path: 원본 EPUB 파일 경로
     :param workspace: 작업 디렉토리
-    :param translate_fn: 번역 함수
+    :param translate_fn: def translation(text_chunk: str, prev_context: str) -> str
     :param target_lang: 대상 언어 코드
     :param max_chars: 번역기 1회 호출 당 최대 글자 수
+    :param max_workers: 병렬 처리 워커 수 (기본 10)
     :returns: 번역된 EPUB이 추출된 디렉토리 경로
     """
     data = extract_epub(epub_path, workspace)
@@ -404,23 +458,44 @@ def translate_epub(
     opf_dir: Path = data["opf_dir"]
     xhtml_files: list[element.Tag] = data["xhtml_files"]
 
+    # 유효한 XHTML 경로 목록 수집
+    xhtml_paths: list[Path] = []
     for item in xhtml_files:
         href = str(item.get('href', ''))
         if not href:
             continue
-        
-        xhtml_path_resolved = output_dir / opf_dir / href
-        if not xhtml_path_resolved.exists():
-            logging.warning(f"XHTML 파일을 찾을 수 없습니다: {xhtml_path_resolved}")
+        resolved = output_dir / opf_dir / href
+        if not resolved.exists():
+            logging.warning(f"XHTML 파일을 찾을 수 없습니다: {resolved}")
             continue
+        xhtml_paths.append(resolved)
 
-        logging.info(f"번역 중: {xhtml_path_resolved}")
+    def _process_one(xhtml_path: Path) -> None:
+        """단일 XHTML 파일 번역 후 덮어쓰기."""
         translated_xhtml = translate_xhtml(
-            xhtml_path_resolved, translate_fn, target_lang, max_chars
+            xhtml_path, translate_fn, target_lang, max_chars
         )
-
-        with open(xhtml_path_resolved, 'w', encoding='utf-8') as f:
+        with open(xhtml_path, 'w', encoding='utf-8') as f:
             f.write(translated_xhtml)
+
+    if max_workers <= 1:
+        # 순차 처리
+        for xhtml_path in tqdm(xhtml_paths, desc="번역 중", unit="file"):
+            _process_one(xhtml_path)
+    else:
+        # 병렬 처리
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_process_one, p): p for p in xhtml_paths
+            }
+            with tqdm(total=len(futures), desc="번역 중", unit="file") as pbar:
+                for future in concurrent.futures.as_completed(futures):
+                    path = futures[future]
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logging.error(f"XHTML 번역 실패: {path} — {e}")
+                    pbar.update(1)
 
     return output_dir
 
@@ -535,6 +610,38 @@ def extract_epub(epub_path: Path, workspace: Path) -> dict:
     }
 
     return data
+
+def repackage_epub(extracted_dir: Path, output_path: Path) -> Path:
+    """
+    추출된 EPUB 디렉토리를 .epub 파일로 다시 패키징합니다.
+
+    EPUB 스펙에 따라 mimetype 파일은 압축하지 않고 ZIP의 첫 번째 엔트리로 저장합니다.
+    작업용 log.txt는 제외합니다.
+
+    :param extracted_dir: 추출된 EPUB 파일들이 있는 디렉토리
+    :param output_path: 출력할 .epub 파일 경로
+    :returns: 생성된 .epub 파일 경로
+    """
+    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # mimetype은 반드시 첫 번째 엔트리, 비압축으로 저장 (EPUB OCF 스펙)
+        mimetype_path = extracted_dir / "mimetype"
+        if mimetype_path.exists():
+            zf.write(mimetype_path, "mimetype", compress_type=zipfile.ZIP_STORED)
+
+        # 나머지 파일 추가
+        for file_path in sorted(extracted_dir.rglob("*")):
+            if not file_path.is_file():
+                continue
+            if file_path.name == "mimetype":
+                continue
+            arcname = file_path.relative_to(extracted_dir).as_posix()
+            if arcname == "log.txt":
+                continue
+            zf.write(file_path, arcname)
+
+    logging.info(f"EPUB 패키징 완료: {output_path}")
+    return output_path
+
 
 def trim_ruby_text(text: str) -> str:
     """
