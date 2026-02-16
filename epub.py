@@ -1,5 +1,4 @@
 import re
-from urllib.parse import quote, unquote
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Callable
@@ -20,29 +19,19 @@ _XHTML_MULTI_VALUED_ATTRS: dict[str, list[str]] = {"*": ["class"]}
 @dataclass
 class TextSegment:
     """
-    블록 요소 하나에서 추출한 텍스트 단위.
-    EPUB 텍스트 추출 시 각 블록 요소(p, h1~h6 등)의 텍스트를 TextSegment로 추출하여
-    원본 위치에 플레이스홀더를 삽입한 후, 번역 결과를 다시 DOM에 주입할 때 사용.    
+    번역 가능한 텍스트 단위.
+    원본 DOM의 텍스트 노드 또는 태그 텍스트를 대상으로 번역 후 같은 위치에 주입한다.
     """
     index: int
-    element: Tag
     original_text: str
+    target_tag: Tag | None = None
+    target_text_node: NavigableString | None = None
     translated_text: str | None = None
 
 
 _JP_INLINE_UNWRAP_CLASSES = {'koboSpan', 'tcy', 'upright'}
 _PRESERVE_INLINE_CLASSES = {'em-sesame', 'bold', 'italic'}
 _BLOCK_TAGS = frozenset({'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'li'})
-_INLINE_MARKER_RE = re.compile(r'<<([a-zA-Z0-9_-]+):(.+?)>>')
-_INLINE_ATTR_SEP = "||"
-
-
-def _encode_marker_value(value: str) -> str:
-    return quote(value, safe="")
-
-
-def _decode_marker_value(value: str) -> str:
-    return unquote(value)
 
 
 def simplify_dom(body: Tag) -> None:
@@ -78,48 +67,51 @@ def simplify_dom(body: Tag) -> None:
     body.smooth()
 
 
-def _extract_text_with_inline_markers(elem: Tag) -> str:
+def _collect_segments_from_node(node: Tag, segments: list[TextSegment], next_index: int) -> int:
     """
-    블록 요소 내부에서 텍스트를 추출합니다.
-    
-    _PRESERVE_INLINE_CLASSES에 해당하는 인라인 서식은 <<class:text>> 마커로 변환하여
-    번역 후 복원할 수 있도록 합니다.
-    
-    예: <span class="em-sesame">友達</span> → <<em-sesame:友達>>
-    
-    :param elem: 텍스트를 추출할 블록 요소
-    :returns: 인라인 마커가 포함된 plain text
-    """
-    parts: list[str] = []
-    for child in elem.children:
-        if isinstance(child, NavigableString):
-            parts.append(str(child))
-        elif isinstance(child, Tag):
-            if child.name == 'a':
-                href = child.get('href', '') or ''
-                anchor_id = child.get('id', '') or ''
-                cls_list = child.get('class', [])
-                cls_text = " ".join(cls_list) if isinstance(cls_list, list) else str(cls_list)
-                inner_text = child.get_text()
-                attrs = [
-                    f"href={_encode_marker_value(href)}",
-                    f"id={_encode_marker_value(anchor_id)}",
-                    f"class={_encode_marker_value(cls_text)}",
-                    f"text={_encode_marker_value(inner_text)}",
-                ]
-                parts.append(f"<<a:{_INLINE_ATTR_SEP.join(attrs)}>>")
-                continue
+    블록 요소 하위에서 번역 가능한 텍스트를 순회 수집합니다.
 
-            cls_list = child.get('class', [])
-            cls_set = set(cls_list) if isinstance(cls_list, list) else {cls_list} if cls_list else set()
-            marker_cls = cls_set & _PRESERVE_INLINE_CLASSES
-            inner_text = child.get_text()
-            if marker_cls:
-                cls_name = next(iter(marker_cls))
-                parts.append(f"<<{cls_name}:{inner_text}>>")
-            else:
-                parts.append(inner_text)
-    return "".join(parts)
+    - <a> 태그 텍스트는 태그 단위로 수집하여 속성을 유지합니다.
+    - _PRESERVE_INLINE_CLASSES 태그 텍스트는 태그 단위로 수집합니다.
+    - 그 외 텍스트는 NavigableString 단위로 수집합니다.
+    """
+    for child in list(node.children):
+        if isinstance(child, NavigableString):
+            text = str(child)
+            if text.strip():
+                segments.append(
+                    TextSegment(
+                        index=next_index,
+                        original_text=text,
+                        target_text_node=child,
+                    )
+                )
+                next_index += 1
+            continue
+
+        if not isinstance(child, Tag):
+            continue
+
+        cls_list = child.get('class', [])
+        cls_set = set(cls_list) if isinstance(cls_list, list) else {cls_list} if cls_list else set()
+        should_capture_tag_text = child.name == 'a' or bool(cls_set & _PRESERVE_INLINE_CLASSES)
+
+        if should_capture_tag_text:
+            text = child.get_text()
+            if text.strip():
+                segments.append(
+                    TextSegment(
+                        index=next_index,
+                        original_text=text,
+                        target_tag=child,
+                    )
+                )
+                next_index += 1
+            continue
+
+        next_index = _collect_segments_from_node(child, segments, next_index)
+
+    return next_index
 
 
 def _has_nested_block(elem: Tag) -> bool:
@@ -132,14 +124,10 @@ def _has_nested_block(elem: Tag) -> bool:
 
 def extract_segments(body: Tag) -> list[TextSegment]:
     """
-    body에서 블록 요소별로 텍스트를 추출하고, 원본 위치에 플레이스홀더를 삽입합니다.
-    
-    각 블록 요소(p, h1~h6 등)의 텍스트를 TextSegment로 추출하고,
-    원본 DOM의 해당 위치를 ``{{SEG:<index>}}`` 플레이스홀더로 치환하여
-    스켈레톤 DOM을 생성합니다.
-    
-    빈 요소(<p><br/></p> 등)는 스킵하여 구조를 그대로 유지합니다.
-    중첩 블록(div > p)이 있으면 최하위 블록만 처리합니다.
+    body에서 번역 가능한 텍스트 세그먼트를 추출합니다.
+
+    블록 구조와 인라인 태그 구조는 유지하고, 텍스트 노드/태그 텍스트만 분리합니다.
+    따라서 LLM 출력에서 구조 토큰 보존에 의존하지 않고 DOM 재조립이 가능합니다.
     
     :param body: simplify_dom() 처리가 완료된 <body> Tag
     :returns: 추출된 TextSegment 리스트
@@ -155,16 +143,7 @@ def extract_segments(body: Tag) -> list[TextSegment]:
         if _has_nested_block(elem):
             continue
 
-        text = _extract_text_with_inline_markers(elem).strip()
-        if not text:
-            continue
-
-        seg = TextSegment(index=index, element=elem, original_text=text)
-        segments.append(seg)
-
-        elem.clear()
-        elem.string = f"{{{{SEG:{index}}}}}"
-        index += 1
+        index = _collect_segments_from_node(elem, segments, index)
 
     return segments
 
@@ -310,56 +289,20 @@ def translate_and_inject(
 
 def _inject_translations(segments: list[TextSegment]) -> None:
     """
-    스켈레톤 DOM의 ``{{SEG:<index>}}`` 플레이스홀더를 번역문으로 치환합니다.
-    
-    번역문에 ``<<class:text>>`` 인라인 마커가 포함되어 있으면
-    ``<span class="class">text</span>``으로 복원합니다.
+    번역 결과를 원본 DOM의 대응 텍스트 노드/태그 텍스트에 직접 주입합니다.
     
     :param segments: translated_text가 채워진 TextSegment 리스트
     """
     for seg in segments:
-        text = seg.translated_text if seg.translated_text else seg.original_text
-        seg.element.clear()
+        text = seg.translated_text if seg.translated_text is not None else seg.original_text
 
-        parts = _INLINE_MARKER_RE.split(text)
-        if len(parts) == 1:
-            seg.element.string = text
-        else:
-            i = 0
-            while i < len(parts):
-                if i % 3 == 0:
-                    if parts[i]:
-                        seg.element.append(NavigableString(parts[i]))
-                elif i % 3 == 1:
-                    cls_name = parts[i]
-                    inner = parts[i + 1] if i + 1 < len(parts) else ""
-                    if cls_name == 'a':
-                        attrs = {}
-                        for item in inner.split(_INLINE_ATTR_SEP):
-                            if "=" not in item:
-                                continue
-                            key, value = item.split("=", 1)
-                            attrs[key] = _decode_marker_value(value)
-                        anchor_text = attrs.pop("text", "")
-                        anchor = BeautifulSoup("", 'html.parser').new_tag("a")
-                        if attrs.get("href"):
-                            anchor["href"] = attrs["href"]
-                        if attrs.get("id"):
-                            anchor["id"] = attrs["id"]
-                        if attrs.get("class"):
-                            anchor["class"] = attrs["class"].split()
-                        if anchor_text:
-                            anchor.append(NavigableString(anchor_text))
-                        seg.element.append(anchor)
-                    else:
-                        span_soup = BeautifulSoup(
-                            f'<span class="{cls_name}">{inner}</span>', 'html.parser'
-                        )
-                        new_span = span_soup.find('span')
-                        if new_span:
-                            seg.element.append(new_span)
-                    i += 1
-                i += 1
+        if seg.target_tag is not None:
+            seg.target_tag.clear()
+            seg.target_tag.append(NavigableString(text))
+            continue
+
+        if seg.target_text_node is not None:
+            seg.target_text_node.replace_with(NavigableString(text))
 
 
 def postprocess_xhtml(soup: BeautifulSoup, target_lang: str = "ko") -> None:
