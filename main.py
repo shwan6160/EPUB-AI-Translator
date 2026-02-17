@@ -1,5 +1,8 @@
 import csv, json
 import os
+import sys
+import subprocess
+import signal
 import zipfile
 import re
 from pathlib import Path
@@ -37,6 +40,10 @@ from prompts.dictionary import *
 from prompts.translation import base_prompt_instructions, base_prompt_text
 
 app = typer.Typer()
+dashboard = typer.Typer(help="웹 대시보드 서버 관리")
+app.add_typer(dashboard, name="dashboard", help="FastAPI 대시보드를 백그라운드에서 실행/종료하는 커맨드")
+
+PID_FILE = Path(".dashboard.pid")
 
 def select_provider(provider_select: str|None = None) -> str:
     provider_list = ["Google", "OpenRouter", "Copilot"]
@@ -319,9 +326,57 @@ def run(
         elif translate_provider == "OpenRouter":
             print("OpenRouter 번역이 아직 구현되지 않았습니다.")
 
-@app.command()
-def dashboard():
-    print("Web dashboard is not implemented yet.")
+@dashboard.command("start")
+def dashboard_start(
+    port: Annotated[int, typer.Option("--port", "-p", help="대시보드 포트")] = 8000
+):
+    """FastAPI 대시보드를 백그라운드에서 실행합니다."""
+    typer.echo(f"포트 {port}에서 백그라운드 서버 시작을 준비합니다...")
+
+    if PID_FILE.exists():
+        typer.secho("⚠️ 대시보드가 이미 실행 중인 것 같습니다. (먼저 stop 커맨드를 사용하세요)", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+
+    cmd = [sys.executable, "-m", "uvicorn", "web.app:app", "--port", str(port)]
+
+    try:
+        if os.name == 'nt':
+            raise Exception("Fuck windows")
+        else:
+            log_file = open("dashboard_error.log", "w")
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            PID_FILE.write_text(str(process.pid))
+        typer.secho(f"대시보드가 백그라운드에서 실행되었습니다! (PID: {process.pid})", fg=typer.colors.GREEN)
+        typer.echo(f"접속 주소: http://127.0.0.1:{port}")
+        
+    except Exception as e:
+        typer.secho(f"서버 실행 실패: {e}", fg=typer.colors.RED)
+
+@dashboard.command("stop")
+def dashboard_stop():
+    """백그라운드에서 실행 중인 대시보드를 종료합니다."""
+
+    if not PID_FILE.exists():
+        typer.secho("실행 중인 대시보드 백그라운드 프로세스를 찾을 수 없습니다.", fg=typer.colors.BLUE)
+        return
+
+    pid = int(PID_FILE.read_text().strip())
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+        typer.secho(f"대시보드 서버(PID: {pid})를 성공적으로 종료했습니다.", fg=typer.colors.GREEN)
+    except ProcessLookupError:
+        typer.secho("프로세스가 이미 종료되어 있습니다.", fg=typer.colors.YELLOW)
+    except Exception as e:
+        typer.secho(f"프로세스 종료 중 오류 발생: {e}", fg=typer.colors.RED)
+    finally:
+        if PID_FILE.exists():
+            PID_FILE.unlink()
 
 if __name__ == "__main__":
     app()

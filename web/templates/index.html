@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        body { font-family: sans-serif; margin: 40px; background-color: #f4f4f9; }
+        .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { color: #333; }
+        .status { padding: 10px; background: #e0f7fa; border-left: 4px solid #00acc1; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 {{ title }}</h1>
+        <p>CLI 도구와 연동된 로컬 웹 대시보드입니다.</p>
+        
+        <div class="status">
+            <strong>현재 상태:</strong> {{ status }}
+        </div>
+    </div>
+</body>
+</html>

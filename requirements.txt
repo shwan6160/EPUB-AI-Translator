@@ -17,8 +17,10 @@ h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
 idna==3.11
+Jinja2==3.1.6
 lxml==6.0.2
 markdown-it-py==4.0.0
+MarkupSafe==3.0.3
 mdurl==0.1.2
 packaging==26.0
 pikepdf==10.3.0
@@ -43,5 +45,6 @@ typer==0.24.0
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 urllib3==2.6.3
+uvicorn==0.41.0
 websockets==15.0.1
 wrapt==2.1.1
