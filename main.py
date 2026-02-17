@@ -317,4 +317,4 @@ def dashboard_stop():
             PID_FILE.unlink()
 
 if __name__ == "__main__":
-    app()
+    app(prog_name="eprs")
