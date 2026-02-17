@@ -20,7 +20,8 @@ from prompts.translation import base_prompt_instructions, base_prompt_text
 
 app = typer.Typer()
 dashboard = typer.Typer(help="웹 대시보드 서버 관리")
-app.add_typer(dashboard, name="dashboard", help="FastAPI 대시보드를 백그라운드에서 실행/종료하는 커맨드")
+app.add_typer(dashboard, name="dashboard", help="FastAPI 대시보드를 백그라운드에서 실행/종료하는 커맨드/ alias: dash", hidden=False)
+app.add_typer(dashboard, name="dash", hidden=True)
 
 PID_FILE = Path(".dashboard.pid")
 
@@ -281,7 +282,6 @@ def dashboard_start(
         if os.name == 'nt':
             raise Exception("Fuck windows")
         else:
-            log_file = open("dashboard_error.log", "w")
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
