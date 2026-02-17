@@ -15,34 +15,18 @@
             <section class="tool-box">
                 <h2>캐릭터 사전 생성</h2>
                 <label for="dict-provider">Provider</label>
-                <select id="dict-provider">
-                    <option>OpenAI</option>
-                    <option>Google</option>
-                    <option>Anthropic</option>
-                </select>
+                <select id="dict-provider"></select>
                 <label for="dict-model">Model</label>
-                <select id="dict-model">
-                    <option>gpt-4o-mini</option>
-                    <option>gemini-2.0-flash</option>
-                    <option>claude-3-5-sonnet</option>
-                </select>
+                <select id="dict-model"></select>
                 <button type="button" class="action-btn">캐릭터 사전 생성</button>
             </section>
 
             <section class="tool-box">
                 <h2>번역</h2>
                 <label for="translate-provider">Provider</label>
-                <select id="translate-provider">
-                    <option>OpenAI</option>
-                    <option>Google</option>
-                    <option>Anthropic</option>
-                </select>
+                <select id="translate-provider"></select>
                 <label for="translate-model">Model</label>
-                <select id="translate-model">
-                    <option>gpt-4o-mini</option>
-                    <option>gemini-2.0-flash</option>
-                    <option>claude-3-5-sonnet</option>
-                </select>
+                <select id="translate-model"></select>
                 <button type="button" class="action-btn">번역 시작</button>
             </section>
         </aside>
@@ -95,7 +79,77 @@
         const resultMsg = document.getElementById('result-msg');
         const uploadedFiles = document.getElementById('uploaded-files');
         const jsonContent = document.getElementById('json-content');
+        const dictProviderSelect = document.getElementById('dict-provider');
+        const dictModelSelect = document.getElementById('dict-model');
+        const translateProviderSelect = document.getElementById('translate-provider');
+        const translateModelSelect = document.getElementById('translate-model');
         let selectedFilename = null;
+
+        function setSelectOptions(selectElement, values, placeholder) {
+            selectElement.innerHTML = '';
+
+            if (!values || values.length === 0) {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = placeholder;
+                selectElement.appendChild(option);
+                return;
+            }
+
+            values.forEach((value) => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                selectElement.appendChild(option);
+            });
+        }
+
+        function loadModels(provider, modelSelect) {
+            if (!provider) {
+                setSelectOptions(modelSelect, [], '모델 없음');
+                return;
+            }
+
+            fetch(`/models?provider=${encodeURIComponent(provider)}`)
+                .then((response) => response.json())
+                .then((data) => {
+                    if (data.status !== 'success') {
+                        setSelectOptions(modelSelect, [], '모델 조회 실패');
+                        return;
+                    }
+
+                    setSelectOptions(modelSelect, data.models, '모델 없음');
+                })
+                .catch(() => {
+                    setSelectOptions(modelSelect, [], '모델 조회 실패');
+                });
+        }
+
+        function loadProviderAndModels() {
+            fetch('/providers')
+                .then((response) => response.json())
+                .then((data) => {
+                    if (data.status !== 'success') {
+                        setSelectOptions(dictProviderSelect, [], 'Provider 조회 실패');
+                        setSelectOptions(translateProviderSelect, [], 'Provider 조회 실패');
+                        setSelectOptions(dictModelSelect, [], '모델 없음');
+                        setSelectOptions(translateModelSelect, [], '모델 없음');
+                        return;
+                    }
+
+                    setSelectOptions(dictProviderSelect, data.providers, 'Provider 없음');
+                    setSelectOptions(translateProviderSelect, data.providers, 'Provider 없음');
+
+                    loadModels(dictProviderSelect.value, dictModelSelect);
+                    loadModels(translateProviderSelect.value, translateModelSelect);
+                })
+                .catch(() => {
+                    setSelectOptions(dictProviderSelect, [], 'Provider 조회 실패');
+                    setSelectOptions(translateProviderSelect, [], 'Provider 조회 실패');
+                    setSelectOptions(dictModelSelect, [], '모델 없음');
+                    setSelectOptions(translateModelSelect, [], '모델 없음');
+                });
+        }
 
         function showJsonMessage(message, type = 'info') {
             jsonContent.innerHTML = '';
@@ -388,6 +442,15 @@
                 });
         });
 
+        dictProviderSelect.addEventListener('change', () => {
+            loadModels(dictProviderSelect.value, dictModelSelect);
+        });
+
+        translateProviderSelect.addEventListener('change', () => {
+            loadModels(translateProviderSelect.value, translateModelSelect);
+        });
+
+        loadProviderAndModels();
         refreshUploadedFiles();
     </script>
 </body>

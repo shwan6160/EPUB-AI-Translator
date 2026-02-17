@@ -7,12 +7,24 @@ import shutil
 import json
 
 from utils import get_workspace
+from provider import GoogleGenai
+from utils import get_api_key
 
 app = FastAPI()
 
 TITLE = "Rosetta(Temporary)"
 UPLOAD_DIR = get_workspace() / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+PROVIDER_OPTIONS = ["Google", "OpenRouter", "Copilot"]
+OPENROUTER_MODELS = [
+    "qwen/qwen3-max-thinking",
+    "moonshotai/kimi-k2.5",
+    "z-ai/GLM-5",
+]
+GOOGLE_FALLBACK_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+]
 
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
@@ -33,6 +45,23 @@ def get_uploaded_epub_items() -> list[dict[str, str | bool]]:
         )
     return items
 
+
+def get_dashboard_models(provider_name: str) -> list[str]:
+    if provider_name == "Google":
+        try:
+            key = get_api_key("GEMINI_KEY")
+            return [model.replace("models/", "") for model in GoogleGenai.list_available_models(key)]
+        except Exception:
+            return GOOGLE_FALLBACK_MODELS
+
+    if provider_name == "OpenRouter":
+        return OPENROUTER_MODELS
+
+    if provider_name == "Copilot":
+        return []
+
+    return []
+
 @app.get("/")
 def read_root(request: Request):
     return templates.TemplateResponse(
@@ -48,6 +77,19 @@ def read_root(request: Request):
 @app.get("/uploads")
 def list_uploads():
     return {"status": "success", "files": get_uploaded_epub_items()}
+
+
+@app.get("/providers")
+def list_providers():
+    return {"status": "success", "providers": PROVIDER_OPTIONS}
+
+
+@app.get("/models")
+def list_models(provider: str):
+    if provider not in PROVIDER_OPTIONS:
+        return {"status": "error", "message": "유효하지 않은 provider 입니다.", "models": []}
+
+    return {"status": "success", "provider": provider, "models": get_dashboard_models(provider)}
 
 
 @app.get("/character-dictionary")
