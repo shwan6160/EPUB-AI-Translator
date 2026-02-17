@@ -3,6 +3,7 @@ import os
 import zipfile
 import re
 from pathlib import Path
+from typing import Annotated
 
 import time, datetime
 from xml.dom import minidom
@@ -20,6 +21,7 @@ from bs4 import BeautifulSoup
 
 from PIL import Image, ImageDraw, ImageFont
 
+import typer
 from tqdm import tqdm
 import colorama
 
@@ -34,178 +36,292 @@ from dictionary import load_full_text_from_epub, parse_dictionary_json
 from prompts.dictionary import *
 from prompts.translation import base_prompt_instructions, base_prompt_text
 
-provider_select = "Google"  # "Google" 또는 "OpenRouter" 중 선택
+app = typer.Typer()
 
-# epub 파일 경로 확인 및 텍스트 추출
-epub_file_path = input("EPUB 파일 경로를 입력하세요: ")
-epub_extracted = extract_epub(Path(epub_file_path), get_workspace())
-full_text = load_full_text_from_epub(epub_extracted)
+def select_provider(provider_select: str|None = None) -> str:
+    provider_list = ["Google", "OpenRouter", "Copilot"]
+    if provider_select in provider_list:
+        return provider_select
 
-key = ""
-model = ""
-char_dict = None
-char_dict_path = get_workspace() / Path(epub_file_path).with_name(f"{Path(epub_file_path).stem}_character_dictionary.json")
+    print("사용할 모델 제공자를 선택하세요:")
+    for p in enumerate(provider_list, start=1):
+        print(f"{p[0]}. {p[1]}")
 
-# 기존 캐릭터 사전 JSON이 있으면 로드 시도
-if char_dict_path.exists():
-    try:
-        with open(char_dict_path, "r", encoding="utf-8") as f:
-            char_dict = json.load(f)
-        # parse_dictionary_json 검증 로직 재활용 (characters, groups 키 확인)
-        parse_dictionary_json(json.dumps(char_dict, ensure_ascii=False))
-        print(f"기존 캐릭터 사전을 로드했습니다: {char_dict_path}")
-    except Exception as e:
-        print(f"기존 캐릭터 사전 로드 실패: {e}")
-        char_dict = None
+    while True:
+        provider_select = input("Provider: ")
+        if provider_select.isdigit() and 1 <= int(provider_select) <= len(provider_list):
+            return provider_list[int(provider_select)-1]
+        elif provider_select in provider_list:
+            return provider_select
+        else:
+            print("잘못된 입력입니다. 다시 입력하십시오.")
 
-if char_dict is None:
-    provider_select = input("provider: ")
-
-if char_dict is None and provider_select == "Google":
-    key = get_api_key("GEMINI_KEY")
-    if not key:
-        print("GEMINI_KEY가 설정되지 않았습니다. API 키를 입력해 주십시오.")
-        key = input("GEMINI_KEY: ").strip()
-        if not key:
-            raise ValueError("API 키가 설정되지 않았습니다.")
-
-    try:
-        available_models = GoogleGenai.list_available_models(key)
-    except Exception as e:
-        print(f"모델 목록을 불러오는 중 오류가 발생했습니다: {e}")
-        raise
-
+def select_model(available_models: list[str]) -> str:
     print("사용 가능한 모델 목록:")
-    for model in available_models:
-        print(f"  - {model}")
+    for m in enumerate(available_models, start=1):
+        print(f"{m[0]}. {m[1]}")
+    while True:
+        model_select = input("모델: ")
+        if model_select.isdigit() and 1 <= int(model_select) <= len(available_models):
+            return available_models[int(model_select)-1]
+        else:
+            print("잘못된 입력입니다. 다시 입력하십시오.")
 
-    model = input("사용할 모델 이름을 입력하세요: ")
+def yn_check(yes: bool, prompt: str) -> bool:
+    if yes:
+        return True
+    while True:
+        user_input = input(prompt + " (y/n):").strip().lower()
+        if user_input in ['y', 'yes']:
+            return True
+        elif user_input in ['n', 'no']:
+            return False
+        else:
+            print("'y' 또는 'n'을 입력하십시오.")
 
-    provider = GoogleGenai(
-        config = GoogleGenaiConfig(
-            api_key = key,
-            model_name = model,
-            generation_config = genai.types.GenerateContentConfig(
-                system_instruction = CHARACTER_DICT_SYSTEM_PROMPT,
-                temperature = 0.2,
-                top_p = 0.8,
-                top_k = 40,
-                response_mime_type = "application/json"
-            )
-        )
-    )
+@app.command()
+def run(
+        epub_file: Annotated[str, typer.Argument(help="번역할 EPUB 파일 경로")],
+        provider: Annotated[str|None, typer.Option("--provider", "-p", help="모델 제공자 선택 (Google 또는 OpenRouter)")] = None,
+        model: Annotated[str|None, typer.Option("--model", "-m", help="사용할 모델 이름 (Ex: gemini-2.5-flash, qwen/qwen3-max-thinking)")] = None,
+        key: Annotated[str|None, typer.Option("--key", "-k", help="API 키")] = None,
+        yes: Annotated[bool, typer.Option("-y")] = False
+    ) -> None:
 
-    response_text = provider.generate_content(
-        user_prompt=CHARACTER_DICT_USER_PROMPT.format(novel_text=full_text)
-    )
-    char_dict = parse_dictionary_json(response_text)
+    epub_file_path = Path(epub_file)
+    char_dict_path = epub_file_path.with_name(f"{Path(epub_file_path).stem}_character_dictionary.json")
 
-    with open(char_dict_path, "w", encoding="utf-8") as f:
-        json.dump(char_dict, f, ensure_ascii=False, indent=2)
-
-elif char_dict is None and provider_select == "OpenRouter":
-    key = get_api_key("OPENROUTER_KEY")
-    if not key:
-        print("OPENROUTER_KEY가 설정되지 않았습니다. API 키를 입력해 주십시오.")
-        key = input("OPENROUTER_KEY: ").strip()
-        if not key:
-            raise ValueError("API 키가 설정되지 않았습니다.")
+    epub_extracted = extract_epub(Path(epub_file_path), get_workspace())
+    full_text = load_full_text_from_epub(epub_extracted)
     
-    model = input("사용할 모델 이름을 입력하세요: ")
-    system_prompt = CHARACTER_DICT_SYSTEM_PROMPT
-    user_prompt = CHARACTER_DICT_USER_PROMPT.format(novel_text=full_text)
+    provider_select = provider
+    dict_provider = None
+    dict_model = None
 
-    if model == "qwen/qwen3-max-thinking":
-        system_prompt = CHARACTER_DICT_SYSTEM_PROMPT_QWEN
-        user_prompt = CHARACTER_DICT_USER_PROMPT_QWEN.format(novel_text=full_text)
-
-    provider = OpenRouter(
-        config=OpenRouterConfig(
-            api_key=key,
-            model_name=model,
-            system_prompt=system_prompt,
-            temperature=0.2,
-            top_p=0.8,
-            response_format={"type": "json_object"},
-            app_name="EPUB-AI-Translator",
-        )
-    )
-
-    response_text = provider.generate_content(
-        user_prompt=user_prompt
-    )
-    char_dict = parse_dictionary_json(response_text)
-    with open(char_dict_path, "w", encoding="utf-8") as f:
-        json.dump(char_dict, f, ensure_ascii=False, indent=2)
-
-elif char_dict is None:
-    print("알 수 없는 모델 제공자입니다.")
+    translate_provider = None
+    translate_model = None
+    
     char_dict = None
 
-# EPUB 번역
-if char_dict is not None:
-    proceed = input("\njson 파일을 검토 후 번역하십시오.\nEPUB 번역을 진행하시겠습니까? (y/n): ").strip().lower()
-    if proceed == 'y':
-        char_dict = json.load(open(char_dict_path, "r", encoding="utf-8"))
-        # Gemini API 키 확인 (Google provider 사용 시 재사용, 아니면 별도 입력)
-        if provider_select == "Google":
-            gemini_key = key
-        else:
+    # 캐릭터 사전 있는지 확인하고 있으면 검증 후 로드, 없으면 경로 묻기
+    if char_dict_path.exists():
+        print(f"기존 캐릭터 사전이 발견되었습니다: {char_dict_path}")
+        load_dict = yn_check(yes, "기존 캐릭터 사전을 로드하시겠습니까?")
+
+        if load_dict:
             try:
-                gemini_key = get_api_key("GEMINI_KEY")
-            except ValueError:
-                print("번역에 사용할 GEMINI_KEY가 설정되지 않았습니다.")
-                gemini_key = input("GEMINI_KEY: ").strip()
-                if not gemini_key:
+                with open(char_dict_path, "r", encoding="utf-8") as f:
+                    char_dict = json.load(f)
+                # dictionary JSON 검증 로직 재활용
+                parse_dictionary_json(json.dumps(char_dict, ensure_ascii=False))
+                print(f"기존 캐릭터 사전을 로드했습니다: {char_dict_path}")
+            except Exception as e:
+                print(f"기존 캐릭터 사전 로드 실패: {e}")
+                char_dict = None
+    
+    if char_dict is None:
+        print("캐릭터 사전 파일을 찾을 수 없습니다.")
+        if not yn_check(yes, "캐릭터 사전을 새로 생성하시겠습니까?"):
+            print("프로그램을 종료합니다.")
+            os._exit(1)
+
+        dict_provider = select_provider(provider_select)
+        dict_model = None
+
+        # dict_model 선택
+        if dict_provider == "Google":
+            key = get_api_key("GEMINI_KEY") if key is None else key
+            if not key:
+                print("GEMINI_KEY가 설정되지 않았습니다. API 키를 입력해 주십시오.")
+                key = input("GEMINI_KEY: ").strip()
+                if not key:
+                    raise ValueError("API 키가 설정되지 않았습니다.")
+            
+            available_models = []
+            try:
+                for m in GoogleGenai.list_available_models(key):
+                    available_models.append(m.replace("models/", ""))
+            except Exception as e:
+                print(f"모델 목록을 불러오는 중 오류가 발생했습니다: {e}")
+                raise
+
+            dict_model = select_model(available_models)
+        
+        elif dict_provider == "OpenRouter":
+            key = get_api_key("OPENROUTER_KEY") if key is None else key
+            if not key:
+                print("OPENROUTER_KEY가 설정되지 않았습니다. API 키를 입력해 주십시오.")
+                key = input("OPENROUTER_KEY: ").strip()
+                if not key:
                     raise ValueError("API 키가 설정되지 않았습니다.")
 
-        translate_model = input("번역에 사용할 Gemini 모델 이름을 입력하세요 (기본: gemini-2.5-flash): ").strip()
-        if not translate_model:
-            translate_model = "gemini-2.5-flash"
+            available_models = [
+                "qwen/qwen3-max-thinking",
+                "moonshotai/kimi-k2.5",
+                "z-ai/GLM-5"
+            ]
+            dict_model = select_model(available_models)
+        
+        elif dict_provider == "Copilot":
+            print("Copilot 모델 제공자는 아직 구현되지 않았습니다.")
+        
+        else:
+            print("알 수 없는 모델 제공자입니다.")
+            os._exit(1)
+        
+        print("선택을 확인합니다.")
+        print(f"EPUB 파일: {epub_file_path}")
+        print(f"모델 제공자: {dict_provider}")
+        print(f"모델 이름: {dict_model}")
 
-        # 캐릭터 사전을 시스템 프롬프트에 포함
-        char_dict_text = json.dumps(char_dict, ensure_ascii=False, indent=2)
-        translation_system_prompt = base_prompt_instructions.format(char_dict_text=char_dict_text)
-
-        translation_provider = GoogleGenai(
-            config=GoogleGenaiConfig(
-                api_key=gemini_key,
-                model_name=translate_model,
-                generation_config=genai.types.GenerateContentConfig(
-                    system_instruction=translation_system_prompt,
-                    temperature=0.7,
-                    top_p=0.9,
-                    top_k=40,
+        if not yn_check(yes, "위 선택으로 캐릭터 사전을 생성하시겠습니까?"):
+            print("프로그램을 종료합니다.")
+            os._exit(1)
+        
+        # 캐릭터 사전 생성
+        if dict_provider == "Google":
+            instance = GoogleGenai(
+                config = GoogleGenaiConfig(
+                    api_key = key,
+                    model_name = dict_model,
+                    generation_config = genai.types.GenerateContentConfig(
+                        system_instruction = CHARACTER_DICT_SYSTEM_PROMPT,
+                        temperature = 0.2,
+                        top_p = 0.8,
+                        top_k = 40,
+                        response_mime_type = "application/json"
+                    )
                 )
             )
-        )
 
-        # translate_fn: 파일 내 chunk간 prev_context는 translate_and_inject에서 자동 관리
-        def translate_fn(chunk_text: str, prev_context: str) -> str:
-            user_prompt = base_prompt_text.format(
-                prev_context=prev_context,
-                current_text=chunk_text
+            response_text = instance.generate_content(
+                user_prompt=CHARACTER_DICT_USER_PROMPT.format(novel_text=full_text)
             )
-            result = translation_provider.generate_content(user_prompt=user_prompt)
-            return result
+            char_dict = parse_dictionary_json(response_text)
+        
+        elif dict_provider == "OpenRouter":
+            system_prompt = CHARACTER_DICT_SYSTEM_PROMPT
+            user_prompt = CHARACTER_DICT_USER_PROMPT.format(novel_text=full_text)
 
-        max_workers_input = input("병렬 워커 수를 입력하세요 (기본: 10): ").strip()
-        max_workers = int(max_workers_input) if max_workers_input.isdigit() and int(max_workers_input) > 0 else 10
+            if dict_model == "qwen/qwen3-max-thinking":
+                system_prompt = CHARACTER_DICT_SYSTEM_PROMPT_QWEN
+                user_prompt = CHARACTER_DICT_USER_PROMPT_QWEN.format(novel_text=full_text)
 
-        print(f"\nEPUB 번역을 시작합니다... (chunk 최대 8000자, 병렬 워커 {max_workers}개)")
-        output_dir = translate_epub(
-            epub_path=Path(epub_file_path),
-            workspace=get_workspace(),
-            translate_fn=translate_fn,
-            target_lang="ko",
-            max_chars=8000,
-            max_workers=max_workers,
-        )
+            instance = OpenRouter(
+                config=OpenRouterConfig(
+                    api_key=key,
+                    model_name=dict_model,
+                    system_prompt=system_prompt,
+                    temperature=0.2,
+                    top_p=0.8,
+                    response_format={"type": "json_object"},
+                    app_name="EPUB-AI-Translator",
+                )
+            )
 
-        # EPUB 리패키징
-        output_epub_path = Path(epub_file_path).with_name(f"{Path(epub_file_path).stem}_ko.epub")
-        repackage_epub(output_dir, output_epub_path)
-        print(f"\n번역 완료! 출력 파일: {output_epub_path}")
-    else:
-        print("번역을 건너뜁니다.")
+            response_text = instance.generate_content(
+                user_prompt=user_prompt
+            )
+            char_dict = parse_dictionary_json(response_text)
+        
+        if yn_check(yes, "캐릭터 사전이 새로 생성되었습니다.\n사전을 파일로 저장하겠습니까?"):
+            with open(char_dict_path, "w", encoding="utf-8") as f:
+                json.dump(char_dict, f, ensure_ascii=False, indent=2)
+    
+    # 번역 진행
+    if dict_provider is not None and dict_model is not None:
+        if yn_check(yes, "캐릭터 사전 모델 설정을 그대로 사용하겠습니까?"):
+            translate_provider = dict_provider
+            translate_model = dict_model
+        else:
+            translate_provider = select_provider(provider_select)
+            translate_model = None
 
+            if translate_provider == "Google":
+                key = get_api_key("GEMINI_KEY") if key is None else key
+                if not key:
+                    print("GEMINI_KEY가 설정되지 않았습니다. API 키를 입력해 주십시오.")
+                    key = input("GEMINI_KEY: ").strip()
+                    if not key:
+                        raise ValueError("API 키가 설정되지 않았습니다.")
+                available_models = []
+                try:
+                    for m in GoogleGenai.list_available_models(key):
+                        available_models.append(m.replace("models/", ""))
+                except Exception as e:
+                    print(f"모델 목록을 불러오는 중 오류가 발생했습니다: {e}")
+                    raise
+                translate_model = select_model(available_models)
+            elif translate_provider == "OpenRouter":
+                key = get_api_key("OPENROUTER_KEY") if key is None else key
+                if not key:
+                    print("OPENROUTER_KEY가 설정되지 않았습니다. API 키를 입력해 주십시오.")
+                    key = input("OPENROUTER_KEY: ").strip()
+                    if not key:
+                        raise ValueError("API 키가 설정되지 않았습니다.")
+                available_models = [
+                    "qwen/qwen3-max-thinking",
+                    "moonshotai/kimi-k2.5",
+                    "z-ai/GLM-5"
+                ]
+                translate_model = select_model(available_models)
+            elif translate_provider == "Copilot":
+                print("Copilot 모델 제공자는 아직 구현되지 않았습니다.")
+            else:
+                print("알 수 없는 모델 제공자입니다.")
+                os._exit(1)
+        
+        if translate_provider == "Google":
+            # 캐릭터 사전 내용 시스템 프롬프트에 포함
+            char_dict_text = json.dumps(char_dict, ensure_ascii=False, indent=2)
+            translation_system_prompt = base_prompt_instructions.format(char_dict_text=char_dict_text)
+            
+            translate_instance = GoogleGenai(
+                config = GoogleGenaiConfig(
+                    api_key = key,
+                    model_name = translate_model,
+                    generation_config = genai.types.GenerateContentConfig(
+                        system_instruction = translation_system_prompt,
+                        temperature = 0.7,
+                        top_p = 0.9,
+                        top_k = 40,
+                    )
+                )
+            )
+
+            # translate_fn: 파일 내 chunk간 prev_context는 translate_and_inject에서 자동 관리
+            def translate_fn(chunk_text: str, prev_context: str) -> str:
+                user_prompt = base_prompt_text.format(
+                    prev_context=prev_context,
+                    current_text=chunk_text
+                )
+                result = translate_instance.generate_content(user_prompt=user_prompt)
+                return result
+    
+            max_workers_input = input("병렬 워커 수를 입력하세요 (기본: 10): ").strip()
+            max_workers = int(max_workers_input) if max_workers_input.isdigit() and int(max_workers_input) > 0 else 10
+    
+            print(f"\nEPUB 번역을 시작합니다... (chunk 최대 8000자, 병렬 워커 {max_workers}개)")
+            output_dir = translate_epub(
+                epub_path=Path(epub_file_path),
+                workspace=get_workspace(),
+                translate_fn=translate_fn,
+                target_lang="ko",
+                max_chars=8000,
+                max_workers=max_workers,
+            )
+    
+            # EPUB 리패키징
+            output_epub_path = Path(epub_file_path).with_name(f"{Path(epub_file_path).stem}_ko.epub")
+            repackage_epub(output_dir, output_epub_path)
+            print(f"\n번역 완료! 출력 파일: {output_epub_path}")
+            
+        elif translate_provider == "OpenRouter":
+            print("OpenRouter 번역이 아직 구현되지 않았습니다.")
+
+@app.command()
+def dashboard():
+    print("Web dashboard is not implemented yet.")
+
+if __name__ == "__main__":
+    app()
