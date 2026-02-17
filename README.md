@@ -8,6 +8,26 @@ EPUB 파일의 일본어 라이트노벨을 LLM을 사용해 한국어로 번역
 * python 3.14
 * CUDA support GPU (로컬 모델을 사용하는 경우)
 
+## Installation
+### 수동 설치
+**Linux(RHEL, Fedora)**
+```bash
+sudo dnf install git make python3.14 -y
+
+git clone github.com/shwan6160/EPUB-AI-Translator.git
+cd EPUB-AI-Translator
+make install
+```
+
+**Windows**
+```cmd
+winget install Git.Git GnuWin32.Make Python.Python.3.14
+
+git clone github.com/shwan6160/EPUB-AI-Translator.git
+cd EPUB-AI-Translator
+make install
+```
+
 ## Project Structure
 * main.py - entrypoint
 * prompts
