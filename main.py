@@ -32,7 +32,7 @@ import dotenv
 from google import genai
 
 from provider import GoogleGenai, GoogleGenaiConfig, OpenRouter, OpenRouterConfig
-from utils import get_workspace, get_api_key
+from utils import select_provider, select_model, yn_check, get_workspace, get_api_key
 from epub import extract_epub, translate_epub, repackage_epub
 from dictionary import load_full_text_from_epub, parse_dictionary_json
 
@@ -44,47 +44,6 @@ dashboard = typer.Typer(help="웹 대시보드 서버 관리")
 app.add_typer(dashboard, name="dashboard", help="FastAPI 대시보드를 백그라운드에서 실행/종료하는 커맨드")
 
 PID_FILE = Path(".dashboard.pid")
-
-def select_provider(provider_select: str|None = None) -> str:
-    provider_list = ["Google", "OpenRouter", "Copilot"]
-    if provider_select in provider_list:
-        return provider_select
-
-    print("사용할 모델 제공자를 선택하세요:")
-    for p in enumerate(provider_list, start=1):
-        print(f"{p[0]}. {p[1]}")
-
-    while True:
-        provider_select = input("Provider: ")
-        if provider_select.isdigit() and 1 <= int(provider_select) <= len(provider_list):
-            return provider_list[int(provider_select)-1]
-        elif provider_select in provider_list:
-            return provider_select
-        else:
-            print("잘못된 입력입니다. 다시 입력하십시오.")
-
-def select_model(available_models: list[str]) -> str:
-    print("사용 가능한 모델 목록:")
-    for m in enumerate(available_models, start=1):
-        print(f"{m[0]}. {m[1]}")
-    while True:
-        model_select = input("모델: ")
-        if model_select.isdigit() and 1 <= int(model_select) <= len(available_models):
-            return available_models[int(model_select)-1]
-        else:
-            print("잘못된 입력입니다. 다시 입력하십시오.")
-
-def yn_check(yes: bool, prompt: str) -> bool:
-    if yes:
-        return True
-    while True:
-        user_input = input(prompt + " (y/n):").strip().lower()
-        if user_input in ['y', 'yes']:
-            return True
-        elif user_input in ['n', 'no']:
-            return False
-        else:
-            print("'y' 또는 'n'을 입력하십시오.")
 
 @app.command()
 def run(
