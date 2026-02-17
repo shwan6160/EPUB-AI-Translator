@@ -4,21 +4,281 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title }}</title>
-    <style>
-        body { font-family: sans-serif; margin: 40px; background-color: #f4f4f9; }
-        .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        h1 { color: #333; }
-        .status { padding: 10px; background: #e0f7fa; border-left: 4px solid #00acc1; margin-top: 20px; }
-    </style>
+    <link rel="stylesheet" href="/static/index.css">
 </head>
 <body>
-    <div class="container">
-        <h1>📚 {{ title }}</h1>
-        <p>CLI 도구와 연동된 로컬 웹 대시보드입니다.</p>
-        
-        <div class="status">
-            <strong>현재 상태:</strong> {{ status }}
-        </div>
+    <div class="layout">
+        <aside class="sidebar left-sidebar">
+            <h1>📚 {{ title }}</h1>
+            <p class="sidebar-desc">작업 패널 (스켈레톤)</p>
+
+            <section class="tool-box">
+                <h2>캐릭터 사전 생성</h2>
+                <label for="dict-provider">Provider</label>
+                <select id="dict-provider">
+                    <option>OpenAI</option>
+                    <option>Google</option>
+                    <option>Anthropic</option>
+                </select>
+                <label for="dict-model">Model</label>
+                <select id="dict-model">
+                    <option>gpt-4o-mini</option>
+                    <option>gemini-2.0-flash</option>
+                    <option>claude-3-5-sonnet</option>
+                </select>
+                <button type="button" class="action-btn">캐릭터 사전 생성</button>
+            </section>
+
+            <section class="tool-box">
+                <h2>번역</h2>
+                <label for="translate-provider">Provider</label>
+                <select id="translate-provider">
+                    <option>OpenAI</option>
+                    <option>Google</option>
+                    <option>Anthropic</option>
+                </select>
+                <label for="translate-model">Model</label>
+                <select id="translate-model">
+                    <option>gpt-4o-mini</option>
+                    <option>gemini-2.0-flash</option>
+                    <option>claude-3-5-sonnet</option>
+                </select>
+                <button type="button" class="action-btn">번역 시작</button>
+            </section>
+        </aside>
+
+        <main class="main-panel">
+            <section class="json-viewer">
+                <h2>character_dictionary.json 내용</h2>
+                <pre id="json-content">오른쪽에서 파일을 선택하면 character_dictionary.json 내용이 여기에 표시됩니다.</pre>
+            </section>
+        </main>
+
+        <aside class="sidebar right-sidebar">
+            <section class="upload-container">
+                <h2>파일 업로드 및 선택</h2>
+                <p class="sidebar-desc">번역할 EPUB 파일을 드래그하거나 클릭해 업로드하세요.</p>
+
+                <div id="drop-zone">
+                    <p>📥 여기에 파일을 드래그하거나, 클릭해서 선택하세요</p>
+                    <input type="file" id="file-input" accept=".epub">
+                </div>
+
+                <div id="result-msg"></div>
+
+                <section class="uploaded-list">
+                    <h3>업로드된 EPUB 목록</h3>
+                    {% set initial_files = uploaded_items if uploaded_items is defined else uploaded_files if uploaded_files is defined else [] %}
+                    <ul id="uploaded-files">
+                        {% if initial_files %}
+                            {% for item in initial_files %}
+                                {% set filename = item.filename if item is mapping else item %}
+                                {% set has_dictionary = item.has_character_dictionary if item is mapping else true %}
+                                <li>
+                                    <span class="file-item" data-filename="{{ filename }}" data-has-dictionary="{{ 'true' if has_dictionary else 'false' }}">{{ filename }}</span>
+                                </li>
+                            {% endfor %}
+                        {% else %}
+                            <li class="empty">아직 업로드된 EPUB 파일이 없습니다.</li>
+                        {% endif %}
+                    </ul>
+                </section>
+            </section>
+        </aside>
     </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const resultMsg = document.getElementById('result-msg');
+        const uploadedFiles = document.getElementById('uploaded-files');
+        const jsonContent = document.getElementById('json-content');
+        let selectedFilename = null;
+
+        // 1. 박스 클릭 시 숨겨진 file-input 실행
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        // 2. 브라우저 기본 드래그 동작 막기 (파일이 브라우저에서 열려버리는 것 방지)
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+        function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
+
+        // 3. 드래그 중일 때 시각적 피드백 (색상 변경)
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('hover'), false);
+        });
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('hover'), false);
+        });
+
+        // 4. 드롭(Drop) 또는 파일 선택(Change) 시 처리
+        dropZone.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+        function handleFiles(files) {
+            if (files.length === 0) return;
+            const file = files[0];
+            
+            // EPUB 확장자 검사
+            if (!file.name.toLowerCase().endsWith('.epub')) {
+                showMessage("오류: EPUB 파일만 업로드 가능합니다.", "error");
+                return;
+            }
+
+            uploadFile(file);
+        }
+
+        // 5. 서버로 파일 전송 (Fetch API)
+        function uploadFile(file) {
+            showMessage(`업로드 중: ${file.name}...`, "success");
+            
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    showMessage(`✅ ${data.message} (${data.filename})`, "success");
+                    refreshUploadedFiles();
+                } else {
+                    showMessage(`❌ 업로드 실패`, "error");
+                }
+            })
+            .catch(error => {
+                showMessage(`❌ 통신 에러: ${error}`, "error");
+            });
+        }
+
+        // 메시지 띄우는 유틸 함수
+        function showMessage(text, type) {
+            resultMsg.textContent = text;
+            resultMsg.className = type;
+            resultMsg.style.display = 'block';
+        }
+
+        function refreshUploadedFiles() {
+            fetch('/uploads')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status !== 'success') {
+                        return;
+                    }
+
+                    uploadedFiles.innerHTML = '';
+
+                    if (!data.files || data.files.length === 0) {
+                        selectedFilename = null;
+                        const li = document.createElement('li');
+                        li.textContent = '아직 업로드된 EPUB 파일이 없습니다.';
+                        li.className = 'empty';
+                        uploadedFiles.appendChild(li);
+                        jsonContent.textContent = '파일을 선택하면 character_dictionary.json 내용이 여기에 표시됩니다.';
+                        return;
+                    }
+
+                    const previousSelectedFilename = selectedFilename;
+                    selectedFilename = null;
+
+                    data.files.forEach(fileItem => {
+                        const isObjectItem = typeof fileItem === 'object' && fileItem !== null;
+                        const filenameValue = isObjectItem ? fileItem.filename : fileItem;
+                        const hasDictionary = isObjectItem ? !!fileItem.has_character_dictionary : true;
+
+                        if (!filenameValue) {
+                            return;
+                        }
+
+                        const li = document.createElement('li');
+                        const fileItemElement = document.createElement('span');
+                        fileItemElement.className = 'file-item';
+                        fileItemElement.dataset.filename = filenameValue;
+                        fileItemElement.dataset.hasDictionary = hasDictionary ? 'true' : 'false';
+                        fileItemElement.textContent = filenameValue;
+
+                        if (previousSelectedFilename === filenameValue) {
+                            fileItemElement.classList.add('selected');
+                            selectedFilename = filenameValue;
+                        }
+
+                        li.appendChild(fileItemElement);
+                        uploadedFiles.appendChild(li);
+                    });
+
+                    if (!selectedFilename) {
+                        jsonContent.textContent = '파일을 선택하면 character_dictionary.json 내용이 여기에 표시됩니다.';
+                    }
+                })
+                .catch(() => {
+                    // 목록 조회 실패 시 기존 화면 유지
+                });
+        }
+
+        uploadedFiles.addEventListener('click', (e) => {
+            const target = e.target;
+            if (!(target instanceof Element)) {
+                return;
+            }
+
+            const itemElement = target.closest('.file-item');
+            if (!(itemElement instanceof HTMLElement)) {
+                return;
+            }
+
+            const filename = itemElement.dataset.filename;
+            if (!filename) {
+                return;
+            }
+
+            if (selectedFilename === filename) {
+                itemElement.classList.remove('selected');
+                selectedFilename = null;
+                jsonContent.textContent = '선택이 해제되었습니다. 파일을 선택하면 character_dictionary.json 내용이 표시됩니다.';
+                return;
+            }
+
+            uploadedFiles.querySelectorAll('.file-item.selected').forEach((element) => {
+                element.classList.remove('selected');
+            });
+            itemElement.classList.add('selected');
+            selectedFilename = filename;
+
+            const hasDictionary = itemElement.dataset.hasDictionary === 'true';
+            if (!hasDictionary) {
+                jsonContent.textContent = '이 파일에는 character_dictionary.json이 없습니다.';
+                return;
+            }
+
+            jsonContent.textContent = 'JSON을 불러오는 중...';
+
+            fetch(`/character-dictionary?epub_filename=${encodeURIComponent(filename)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (selectedFilename !== filename) {
+                        return;
+                    }
+
+                    if (data.status !== 'success') {
+                        jsonContent.textContent = `오류: ${data.message ?? 'JSON을 불러오지 못했습니다.'}`;
+                        return;
+                    }
+
+                    jsonContent.textContent = JSON.stringify(data.content, null, 2);
+                })
+                .catch((error) => {
+                    if (selectedFilename !== filename) {
+                        return;
+                    }
+                    jsonContent.textContent = `통신 오류: ${error}`;
+                });
+        });
+
+        refreshUploadedFiles();
+    </script>
 </body>
 </html>
