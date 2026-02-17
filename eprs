@@ -1,0 +1,11 @@
+#! /bin/bash
+
+ROOT_DIR=$(cd "$(dirname "$0")" && pwd)
+VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
+
+if [ ! -f "$VENV_PYTHON" ]; then
+    echo "Error: Cannot find venv."
+    exit 1
+fi
+
+exec "$VENV_PYTHON" "$ROOT_DIR/main.py" "$@"
