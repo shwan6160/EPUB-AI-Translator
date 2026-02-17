@@ -1,15 +1,21 @@
+html,
+body {
+    height: 100%;
+}
+
 body {
     font-family: sans-serif;
     margin: 0;
     background-color: #f4f4f9;
     color: #333;
+    overflow: hidden;
 }
 
 .layout {
     display: grid;
     grid-template-columns: 300px minmax(0, 1fr) 360px;
     gap: 16px;
-    min-height: 100vh;
+    height: 100vh;
     padding: 16px;
     box-sizing: border-box;
 }
@@ -19,6 +25,7 @@ body {
     background: white;
     border-radius: 8px;
     box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    min-height: 0;
 }
 
 .sidebar {
@@ -29,17 +36,20 @@ body {
     display: grid;
     align-content: start;
     gap: 14px;
+    overflow: auto;
 }
 
 .right-sidebar {
     display: grid;
     align-content: start;
+    overflow: auto;
 }
 
 .main-panel {
     padding: 20px;
     display: grid;
     min-height: 0;
+    overflow: hidden;
 }
 
 .sidebar h1 {
@@ -179,7 +189,8 @@ body {
     border-radius: 4px;
     padding: 16px;
     min-height: 0;
-    max-height: calc(100vh - 84px);
+    height: 100%;
+    max-height: 100%;
     overflow-x: auto;
     overflow-y: auto;
     margin: 0;
@@ -319,9 +330,10 @@ body {
 @media (max-width: 1024px) {
     .layout {
         grid-template-columns: 1fr;
+        height: 100vh;
     }
 
     #json-content {
-        max-height: calc(100vh - 56px);
+        max-height: 100%;
     }
 }
