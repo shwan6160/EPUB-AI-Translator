@@ -50,7 +50,9 @@
         <main class="main-panel">
             <section class="json-viewer">
                 <h2>character_dictionary.json 내용</h2>
-                <pre id="json-content">오른쪽에서 파일을 선택하면 character_dictionary.json 내용이 여기에 표시됩니다.</pre>
+                <div id="json-content">
+                    <p class="json-message">오른쪽에서 파일을 선택하면 character_dictionary.json 내용이 여기에 표시됩니다.</p>
+                </div>
             </section>
         </main>
 
@@ -94,6 +96,114 @@
         const uploadedFiles = document.getElementById('uploaded-files');
         const jsonContent = document.getElementById('json-content');
         let selectedFilename = null;
+
+        function showJsonMessage(message, type = 'info') {
+            jsonContent.innerHTML = '';
+            const paragraph = document.createElement('p');
+            paragraph.className = `json-message ${type}`;
+            paragraph.textContent = message;
+            jsonContent.appendChild(paragraph);
+        }
+
+        function createPrimitiveNode(value, path) {
+            const valueNode = document.createElement('div');
+            const dataType = value === null ? 'null' : typeof value;
+            valueNode.className = `json-primitive type-${dataType}`;
+            valueNode.dataset.path = path;
+
+            if (value === null) {
+                valueNode.textContent = 'null';
+                return valueNode;
+            }
+
+            valueNode.textContent = String(value);
+            return valueNode;
+        }
+
+        function createArrayNode(arrayValue, path) {
+            const wrapper = document.createElement('ul');
+            wrapper.className = 'json-array';
+            wrapper.dataset.path = path;
+
+            if (arrayValue.length === 0) {
+                const emptyItem = document.createElement('li');
+                emptyItem.className = 'json-empty';
+                emptyItem.textContent = '비어 있는 리스트';
+                wrapper.appendChild(emptyItem);
+                return wrapper;
+            }
+
+            arrayValue.forEach((item, index) => {
+                const row = document.createElement('li');
+                row.className = 'json-array-item';
+
+                const childPath = path ? `${path}.${index}` : String(index);
+
+                const valueContainer = document.createElement('div');
+                valueContainer.className = 'json-item-value';
+                valueContainer.appendChild(renderJsonValue(item, childPath));
+
+                row.appendChild(valueContainer);
+                wrapper.appendChild(row);
+            });
+
+            return wrapper;
+        }
+
+        function createObjectNode(objectValue, path) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'json-object';
+            wrapper.dataset.path = path;
+
+            const entries = Object.entries(objectValue);
+            if (entries.length === 0) {
+                const emptyNode = document.createElement('div');
+                emptyNode.className = 'json-empty';
+                emptyNode.textContent = '비어 있는 객체';
+                wrapper.appendChild(emptyNode);
+                return wrapper;
+            }
+
+            entries.forEach(([key, value]) => {
+                const row = document.createElement('div');
+                row.className = 'json-field';
+
+                const keyNode = document.createElement('div');
+                keyNode.className = 'json-field-key';
+                keyNode.dataset.path = path ? `${path}.${key}` : key;
+                keyNode.textContent = key;
+
+                const childPath = path ? `${path}.${key}` : key;
+                const valueContainer = document.createElement('div');
+                valueContainer.className = 'json-field-value';
+                valueContainer.appendChild(renderJsonValue(value, childPath));
+
+                row.appendChild(keyNode);
+                row.appendChild(valueContainer);
+                wrapper.appendChild(row);
+            });
+
+            return wrapper;
+        }
+
+        function renderJsonValue(value, path = '') {
+            if (Array.isArray(value)) {
+                return createArrayNode(value, path);
+            }
+
+            if (value !== null && typeof value === 'object') {
+                return createObjectNode(value, path);
+            }
+
+            return createPrimitiveNode(value, path);
+        }
+
+        function renderJsonContent(value) {
+            jsonContent.innerHTML = '';
+            const treeRoot = renderJsonValue(value, 'root');
+            treeRoot.classList.add('json-root');
+            jsonContent.appendChild(treeRoot);
+        }
 
         // 1. 박스 클릭 시 숨겨진 file-input 실행
         dropZone.addEventListener('click', () => fileInput.click());
@@ -178,7 +288,7 @@
                         li.textContent = '아직 업로드된 EPUB 파일이 없습니다.';
                         li.className = 'empty';
                         uploadedFiles.appendChild(li);
-                        jsonContent.textContent = '파일을 선택하면 character_dictionary.json 내용이 여기에 표시됩니다.';
+                        showJsonMessage('파일을 선택하면 character_dictionary.json 내용이 여기에 표시됩니다.');
                         return;
                     }
 
@@ -211,7 +321,7 @@
                     });
 
                     if (!selectedFilename) {
-                        jsonContent.textContent = '파일을 선택하면 character_dictionary.json 내용이 여기에 표시됩니다.';
+                        showJsonMessage('파일을 선택하면 character_dictionary.json 내용이 여기에 표시됩니다.');
                     }
                 })
                 .catch(() => {
@@ -238,7 +348,7 @@
             if (selectedFilename === filename) {
                 itemElement.classList.remove('selected');
                 selectedFilename = null;
-                jsonContent.textContent = '선택이 해제되었습니다. 파일을 선택하면 character_dictionary.json 내용이 표시됩니다.';
+                showJsonMessage('선택이 해제되었습니다. 파일을 선택하면 character_dictionary.json 내용이 표시됩니다.');
                 return;
             }
 
@@ -250,11 +360,11 @@
 
             const hasDictionary = itemElement.dataset.hasDictionary === 'true';
             if (!hasDictionary) {
-                jsonContent.textContent = '이 파일에는 character_dictionary.json이 없습니다.';
+                showJsonMessage('이 파일에는 character_dictionary.json이 없습니다.', 'warn');
                 return;
             }
 
-            jsonContent.textContent = 'JSON을 불러오는 중...';
+            showJsonMessage('JSON을 불러오는 중...');
 
             fetch(`/character-dictionary?epub_filename=${encodeURIComponent(filename)}`)
                 .then(response => response.json())
@@ -264,17 +374,17 @@
                     }
 
                     if (data.status !== 'success') {
-                        jsonContent.textContent = `오류: ${data.message ?? 'JSON을 불러오지 못했습니다.'}`;
+                        showJsonMessage(`오류: ${data.message ?? 'JSON을 불러오지 못했습니다.'}`, 'error');
                         return;
                     }
 
-                    jsonContent.textContent = JSON.stringify(data.content, null, 2);
+                    renderJsonContent(data.content);
                 })
                 .catch((error) => {
                     if (selectedFilename !== filename) {
                         return;
                     }
-                    jsonContent.textContent = `통신 오류: ${error}`;
+                    showJsonMessage(`통신 오류: ${error}`, 'error');
                 });
         });
 

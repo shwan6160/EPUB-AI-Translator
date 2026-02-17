@@ -39,6 +39,7 @@ body {
 .main-panel {
     padding: 20px;
     display: grid;
+    min-height: 0;
 }
 
 .sidebar h1 {
@@ -169,6 +170,7 @@ body {
     grid-template-rows: auto minmax(0, 1fr);
     gap: 10px;
     min-height: 0;
+    height: 100%;
 }
 
 #json-content {
@@ -176,11 +178,136 @@ body {
     border: 1px solid #e1e1ea;
     border-radius: 4px;
     padding: 16px;
+    min-height: 0;
+    max-height: calc(100vh - 84px);
+    overflow-x: auto;
+    overflow-y: auto;
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.json-message {
+    margin: 0;
+    color: #555;
+}
+
+.json-message.warn {
+    color: #8a6d1f;
+}
+
+.json-message.error {
+    color: #c62828;
+}
+
+.json-root,
+.json-object,
+.json-array {
+    display: block;
+}
+
+.json-object,
+.json-array {
+    margin: 0;
+    padding: 0;
+}
+
+.json-object {
+    display: grid;
+    gap: 8px;
+}
+
+.json-array {
+    list-style: none;
+    display: grid;
+    gap: 8px;
+}
+
+.json-field,
+.json-array-item {
+    display: grid;
+    align-items: start;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 10px;
+}
+
+.json-field {
+    grid-template-columns: 160px minmax(0, 1fr);
+    gap: 10px;
+}
+
+.json-array-item {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+}
+
+.json-field-key,
+.json-index {
+    color: #0d47a1;
+    font-weight: 600;
+    font-size: 12px;
+    background: #eef4ff;
+    border-radius: 4px;
+    padding: 5px 8px;
+    white-space: nowrap;
+}
+
+.json-field-value,
+.json-item-value {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.json-field:has(.json-field-value > .json-array) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+}
+
+.json-field:has(.json-field-value > .json-array) .json-field-key {
+    display: inline-block;
+    width: fit-content;
+}
+
+.json-primitive {
+    display: inline-block;
+    max-width: 100%;
+    padding: 5px 8px;
+    border-radius: 4px;
+    background: #f0f2f5;
+    color: #333;
     white-space: pre-wrap;
     word-break: break-word;
-    min-height: 70vh;
-    overflow: auto;
-    margin: 0;
+}
+
+.json-primitive.type-string {
+    color: #2e7d32;
+    background: #eaf7ec;
+}
+
+.json-primitive.type-number {
+    color: #6a1b9a;
+    background: #f4eafd;
+}
+
+.json-primitive.type-boolean {
+    color: #ef6c00;
+    background: #fff2e8;
+}
+
+.json-primitive.type-null {
+    color: #9e9e9e;
+    background: #efefef;
+}
+
+.json-empty {
+    border: 1px dashed #d1d5db;
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: #666;
+    background: #fafafa;
 }
 
 @media (max-width: 1280px) {
@@ -195,6 +322,6 @@ body {
     }
 
     #json-content {
-        min-height: 50vh;
+        max-height: calc(100vh - 56px);
     }
 }
