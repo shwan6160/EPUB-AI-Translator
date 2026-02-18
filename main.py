@@ -8,22 +8,19 @@ from typing import Annotated
 
 import typer
 
-from google import genai
+from utils import get_workspace
 
-from provider import GoogleGenai, GoogleGenaiConfig, OpenRouter, OpenRouterConfig
-from utils import select_provider, select_model, yn_check, get_workspace, get_api_key
-from epub import extract_epub, translate_epub, repackage_epub
-from dictionary import load_full_text_from_epub, parse_dictionary_json
 
-from prompts.dictionary import *
-from prompts.translation import base_prompt_instructions, base_prompt_text
-
-app = typer.Typer()
+app = typer.Typer(
+    context_settings={
+        "help_option_names": ["-h", "--help"]
+    }
+)
 dashboard = typer.Typer(help="웹 대시보드 서버 관리")
-app.add_typer(dashboard, name="dashboard", help="FastAPI 대시보드를 백그라운드에서 실행/종료하는 커맨드/ alias: dash", hidden=False)
+app.add_typer(dashboard, name="dashboard", help="FastAPI 대시보드를 백그라운드에서 실행/종료하는 커맨드 alias: dash", hidden=False)
 app.add_typer(dashboard, name="dash", hidden=True)
 
-PID_FILE = Path(".dashboard.pid")
+PID_FILE = get_workspace() / Path(".dashboard.pid")
 
 @app.command()
 def run(
@@ -33,6 +30,19 @@ def run(
         key: Annotated[str|None, typer.Option("--key", "-k", help="API 키")] = None,
         yes: Annotated[bool, typer.Option("-y")] = False
     ) -> None:
+    # 지연로드: run 커맨드에서만 필요한 import들
+    from google import genai
+    from provider import GoogleGenai, GoogleGenaiConfig, OpenRouter, OpenRouterConfig
+    from utils import select_provider, select_model, yn_check, get_workspace, get_api_key
+    from epub import extract_epub, translate_epub, repackage_epub
+    from dictionary import load_full_text_from_epub, parse_dictionary_json
+    from prompts.dictionary import (
+        CHARACTER_DICT_SYSTEM_PROMPT,
+        CHARACTER_DICT_USER_PROMPT,
+        CHARACTER_DICT_SYSTEM_PROMPT_QWEN,
+        CHARACTER_DICT_USER_PROMPT_QWEN
+    )
+    from prompts.translation import base_prompt_instructions, base_prompt_text
 
     epub_file_path = Path(epub_file)
     char_dict_path = epub_file_path.with_name(f"{Path(epub_file_path).stem}_character_dictionary.json")
