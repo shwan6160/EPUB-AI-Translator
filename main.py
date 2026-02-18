@@ -20,6 +20,9 @@ dashboard = typer.Typer(help="웹 대시보드 서버 관리")
 app.add_typer(dashboard, name="dashboard", help="FastAPI 대시보드를 백그라운드에서 실행/종료하는 커맨드 alias: dash", hidden=False)
 app.add_typer(dashboard, name="dash", hidden=True)
 
+typer_key = typer.Typer(help="API 키 관리")
+app.add_typer(typer_key, name="key", help="API 키를 저장/조회하는 커맨드")
+
 PID_FILE = get_workspace() / Path(".dashboard.pid")
 
 @app.command()
@@ -280,7 +283,18 @@ def dashboard_start(
     port: Annotated[int, typer.Option("--port", "-p", help="대시보드 포트")] = 8000
 ):
     """FastAPI 대시보드를 백그라운드에서 실행합니다."""
+    from keyauth import load_keyring
+    
     typer.echo(f"포트 {port}에서 백그라운드 서버 시작을 준비합니다...")
+    typer.echo("API 키를 환경 변수로 로드합니다...")
+    try:
+        load_keyring("GEMINI_KEY")
+        load_keyring("OPENROUTER_KEY")
+        typer.secho("API 키가 성공적으로 로드되었습니다.", fg=typer.colors.GREEN)
+    except Exception as e:
+        typer.secho(f"API 키 로드 중 오류 발생: {e}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
 
     if PID_FILE.exists():
         typer.secho("⚠️ 대시보드가 이미 실행 중인 것 같습니다. (먼저 stop 커맨드를 사용하세요)", fg=typer.colors.YELLOW)
@@ -325,6 +339,41 @@ def dashboard_stop():
     finally:
         if PID_FILE.exists():
             PID_FILE.unlink()
+
+@typer_key.command("set")
+def set_key(
+    name: Annotated[str, typer.Argument(help="키 이름 (예: GEMINI_KEY, OPENROUTER_KEY)")],
+    key: Annotated[str|None, typer.Argument(help="저장할 API 키 값")] = None
+):
+    """API 키를 안전하게 저장합니다."""
+    from keyauth import save_keyring
+
+    if key is None:
+        key = input("저장할 API 키 값을 입력하세요: ").strip()
+        if not key:
+            typer.secho("API 키 값이 비어 있습니다. 저장을 취소합니다.", fg=typer.colors.YELLOW)
+            raise typer.Exit(1)
+
+    save_keyring(name, key)
+    typer.secho(f"{name}이(가) 안전하게 저장되었습니다.", fg=typer.colors.GREEN)
+
+@typer_key.command("list")
+@typer_key.command("ls", hidden=True)
+def list_keys():
+    """저장된 API 키 이름을 나열합니다."""
+    import keyring
+    typer.secho("아직 구현되지 않음", fg=typer.colors.YELLOW)
+
+@typer_key.command("rm")
+@typer_key.command("remove", hidden=True)
+def remove_key(
+    name: Annotated[str, typer.Argument(help="삭제할 키 이름")]
+):
+    """저장된 API 키를 삭제합니다."""
+    import keyring
+
+    keyring.delete_password("erst", name)
+    typer.secho(f"{name}이(가) 삭제되었습니다.", fg=typer.colors.GREEN)
 
 if __name__ == "__main__":
     app(prog_name="erst")

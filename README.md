@@ -12,11 +12,17 @@ EPUB 파일의 일본어 라이트노벨을 LLM을 사용해 한국어로 번역
 ### 수동 설치
 **Linux(RHEL, Fedora)**
 ```bash
-sudo dnf install git make python3.14 -y
+# install reqiurements
+sudo dnf install git make python3.14 pass gpg pinentry-curses-y
 
+# install
 git clone github.com/shwan6160/EPUB-AI-Translator.git
 cd EPUB-AI-Translator
 make install
+
+# setup pass as credential storage
+gpg --full-generate-key
+pass init "user@example.com"
 ```
 
 **Windows**

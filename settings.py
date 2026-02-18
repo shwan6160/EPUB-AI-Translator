@@ -1,3 +1,5 @@
+APP_NAME = "erst"
+
 EPUB = {
     "font": "RIDIBatang.otf",
     "style": "style.css"
