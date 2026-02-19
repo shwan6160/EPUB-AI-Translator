@@ -8,7 +8,7 @@ from typing import Annotated
 
 import typer
 
-from utils import get_workspace
+from utils.utils import get_workspace
 
 
 app = typer.Typer(
@@ -36,7 +36,7 @@ def run(
     # 지연로드: run 커맨드에서만 필요한 import들
     from google import genai
     from provider import GoogleGenai, GoogleGenaiConfig, OpenRouter, OpenRouterConfig
-    from utils import select_provider, select_model, yn_check, get_workspace, get_api_key
+    from utils.utils import select_provider, select_model, yn_check, get_workspace, get_api_key
     from epub import extract_epub, translate_epub, repackage_epub
     from dictionary import load_full_text_from_epub, parse_dictionary_json
     from prompts.dictionary import (

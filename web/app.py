@@ -6,9 +6,9 @@ from pathlib import Path
 import shutil
 import json
 
-from utils import get_workspace
+from utils.utils import get_workspace
 from provider import GoogleGenai
-from utils import get_api_key
+from utils.utils import get_api_key
 
 app = FastAPI()
 

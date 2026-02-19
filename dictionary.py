@@ -4,7 +4,7 @@ import dotenv
 from epub import *
 from provider import *
 from prompts.dictionary import *
-from utils import *
+from utils.utils import *
 
 dotenv.load_dotenv(".env")
 
