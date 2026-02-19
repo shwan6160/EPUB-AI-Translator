@@ -379,6 +379,7 @@ def translate_epub(
     target_lang: str = "ko",
     max_chars: int = 8000,
     max_workers: int = 10,
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> Path:
     """
     EPUB 파일 전체를 번역합니다.
@@ -418,10 +419,14 @@ def translate_epub(
         with open(xhtml_path, 'w', encoding='utf-8') as f:
             f.write(translated_xhtml)
 
+    total_files = len(xhtml_paths)
+
     if max_workers <= 1:
         # 순차 처리
-        for xhtml_path in tqdm(xhtml_paths, desc="번역 중", unit="file"):
+        for index, xhtml_path in enumerate(tqdm(xhtml_paths, desc="번역 중", unit="file"), start=1):
             _process_one(xhtml_path)
+            if progress_callback is not None:
+                progress_callback(index, total_files, xhtml_path.name)
     else:
         # 병렬 처리
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -429,12 +434,16 @@ def translate_epub(
                 executor.submit(_process_one, p): p for p in xhtml_paths
             }
             with tqdm(total=len(futures), desc="번역 중", unit="file") as pbar:
+                done_count = 0
                 for future in concurrent.futures.as_completed(futures):
                     path = futures[future]
                     try:
                         future.result()
                     except Exception as e:
                         logging.error(f"XHTML 번역 실패: {path} — {e}")
+                    done_count += 1
+                    if progress_callback is not None:
+                        progress_callback(done_count, total_files, path.name)
                     pbar.update(1)
 
     return output_dir

@@ -18,7 +18,7 @@
                 <select id="dict-provider"></select>
                 <label for="dict-model">Model</label>
                 <select id="dict-model"></select>
-                <button type="button" class="action-btn">캐릭터 사전 생성</button>
+                <button type="button" id="dict-generate-btn" class="action-btn">캐릭터 사전 생성</button>
             </section>
 
             <section class="tool-box">
@@ -27,7 +27,7 @@
                 <select id="translate-provider"></select>
                 <label for="translate-model">Model</label>
                 <select id="translate-model"></select>
-                <button type="button" class="action-btn">번역 시작</button>
+                <button type="button" id="translate-start-btn" class="action-btn">번역 시작</button>
             </section>
         </aside>
 
@@ -37,6 +37,13 @@
                 <div id="json-content">
                     <p class="json-message">오른쪽에서 파일을 선택하면 character_dictionary.json 내용이 여기에 표시됩니다.</p>
                 </div>
+            </section>
+            <section class="json-viewer">
+                <h2>작업 진행률 / 로그</h2>
+                <div id="task-progress">
+                    <p class="json-message">대기 중</p>
+                </div>
+                <pre id="task-logs" class="json-message" style="max-height: 220px; overflow: auto; white-space: pre-wrap;">로그 없음</pre>
             </section>
         </main>
 
@@ -83,7 +90,13 @@
         const dictModelSelect = document.getElementById('dict-model');
         const translateProviderSelect = document.getElementById('translate-provider');
         const translateModelSelect = document.getElementById('translate-model');
+        const dictGenerateBtn = document.getElementById('dict-generate-btn');
+        const translateStartBtn = document.getElementById('translate-start-btn');
+        const taskProgress = document.getElementById('task-progress');
+        const taskLogs = document.getElementById('task-logs');
         let selectedFilename = null;
+        let activeTaskId = null;
+        let taskPollTimer = null;
 
         function setSelectOptions(selectElement, values, placeholder) {
             selectElement.innerHTML = '';
@@ -259,6 +272,78 @@
             jsonContent.appendChild(treeRoot);
         }
 
+        async function parseJsonResponse(response) {
+            const rawText = await response.text();
+
+            if (!rawText) {
+                throw new Error(`빈 응답입니다. (HTTP ${response.status})`);
+            }
+
+            try {
+                return JSON.parse(rawText);
+            } catch {
+                const preview = rawText.length > 200 ? `${rawText.slice(0, 200)}...` : rawText;
+                throw new Error(`JSON 응답이 아닙니다. (HTTP ${response.status}) ${preview}`);
+            }
+        }
+
+        function renderTaskState(task) {
+            const progressValue = Number.isFinite(task.progress) ? task.progress : 0;
+            taskProgress.innerHTML = `<p class="json-message">상태: ${task.status} / 진행률: ${progressValue}%</p>`;
+
+            if (Array.isArray(task.logs) && task.logs.length > 0) {
+                taskLogs.textContent = task.logs.join('\n');
+            } else {
+                taskLogs.textContent = '로그 없음';
+            }
+        }
+
+        function stopTaskPolling() {
+            if (taskPollTimer) {
+                clearInterval(taskPollTimer);
+                taskPollTimer = null;
+            }
+            activeTaskId = null;
+        }
+
+        function startTaskPolling(taskId, onSuccess) {
+            stopTaskPolling();
+            activeTaskId = taskId;
+
+            const poll = () => {
+                fetch(`/tasks/${encodeURIComponent(taskId)}`)
+                    .then(response => parseJsonResponse(response))
+                    .then(data => {
+                        if (data.status !== 'success' || !data.task) {
+                            showMessage('❌ 작업 상태 조회 실패', 'error');
+                            stopTaskPolling();
+                            return;
+                        }
+
+                        const task = data.task;
+                        renderTaskState(task);
+
+                        if (task.status === 'success') {
+                            stopTaskPolling();
+                            onSuccess(task);
+                            return;
+                        }
+
+                        if (task.status === 'error') {
+                            stopTaskPolling();
+                            showMessage(`❌ ${task.error ?? '작업 실패'}`, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showMessage(`❌ 작업 상태 통신 에러: ${error}`, 'error');
+                        stopTaskPolling();
+                    });
+            };
+
+            poll();
+            taskPollTimer = setInterval(poll, 1000);
+        }
+
         // 1. 박스 클릭 시 숨겨진 file-input 실행
         dropZone.addEventListener('click', () => fileInput.click());
 
@@ -305,7 +390,7 @@
                 method: 'POST',
                 body: formData
             })
-            .then(response => response.json())
+            .then(response => parseJsonResponse(response))
             .then(data => {
                 if (data.status === 'success') {
                     showMessage(`✅ ${data.message} (${data.filename})`, "success");
@@ -328,7 +413,7 @@
 
         function refreshUploadedFiles() {
             fetch('/uploads')
-                .then(response => response.json())
+                .then(response => parseJsonResponse(response))
                 .then(data => {
                     if (data.status !== 'success') {
                         return;
@@ -421,7 +506,7 @@
             showJsonMessage('JSON을 불러오는 중...');
 
             fetch(`/character-dictionary?epub_filename=${encodeURIComponent(filename)}`)
-                .then(response => response.json())
+                .then(response => parseJsonResponse(response))
                 .then(data => {
                     if (selectedFilename !== filename) {
                         return;
@@ -448,6 +533,110 @@
 
         translateProviderSelect.addEventListener('change', () => {
             loadModels(translateProviderSelect.value, translateModelSelect);
+        });
+
+        dictGenerateBtn.addEventListener('click', () => {
+            if (!selectedFilename) {
+                showMessage('먼저 EPUB 파일을 선택해 주세요.', 'error');
+                return;
+            }
+
+            if (!dictProviderSelect.value || !dictModelSelect.value) {
+                showMessage('캐릭터 사전 생성용 Provider/Model을 선택해 주세요.', 'error');
+                return;
+            }
+
+            showMessage('캐릭터 사전 생성 중...', 'success');
+            taskProgress.innerHTML = '<p class="json-message">상태: queued / 진행률: 0%</p>';
+            taskLogs.textContent = '로그 수집 시작...';
+
+            fetch('/tasks/character-dictionary', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    epub_filename: selectedFilename,
+                    provider: dictProviderSelect.value,
+                    model: dictModelSelect.value,
+                    save_to_file: true
+                })
+            })
+            .then(response => parseJsonResponse(response))
+            .then(data => {
+                if (data.status !== 'success') {
+                    showMessage(`❌ ${data.message ?? '캐릭터 사전 생성 실패'}`, 'error');
+                    return;
+                }
+
+                startTaskPolling(data.task_id, () => {
+                    showMessage('✅ 캐릭터 사전 생성 완료', 'success');
+                    refreshUploadedFiles();
+
+                    fetch(`/character-dictionary?epub_filename=${encodeURIComponent(selectedFilename)}`)
+                        .then(response => parseJsonResponse(response))
+                        .then(dictData => {
+                            if (dictData.status !== 'success') {
+                                showJsonMessage(`오류: ${dictData.message ?? 'JSON을 불러오지 못했습니다.'}`, 'error');
+                                return;
+                            }
+                            renderJsonContent(dictData.content);
+                        })
+                        .catch((error) => {
+                            showJsonMessage(`통신 오류: ${error}`, 'error');
+                        });
+                });
+            })
+            .catch(error => {
+                showMessage(`❌ 통신 에러: ${error}`, 'error');
+            });
+        });
+
+        translateStartBtn.addEventListener('click', () => {
+            if (!selectedFilename) {
+                showMessage('먼저 EPUB 파일을 선택해 주세요.', 'error');
+                return;
+            }
+
+            if (!translateProviderSelect.value || !translateModelSelect.value) {
+                showMessage('번역용 Provider/Model을 선택해 주세요.', 'error');
+                return;
+            }
+
+            showMessage('번역 작업 시작...', 'success');
+            taskProgress.innerHTML = '<p class="json-message">상태: queued / 진행률: 0%</p>';
+            taskLogs.textContent = '로그 수집 시작...';
+
+            fetch('/tasks/translation', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    epub_filename: selectedFilename,
+                    provider: translateProviderSelect.value,
+                    model: translateModelSelect.value,
+                    target_lang: 'ko',
+                    max_chars: 8000,
+                    max_workers: 10
+                })
+            })
+            .then(response => parseJsonResponse(response))
+            .then(data => {
+                if (data.status !== 'success') {
+                    showMessage(`❌ ${data.message ?? '번역 실패'}`, 'error');
+                    return;
+                }
+
+                startTaskPolling(data.task_id, (task) => {
+                    const outputName = task?.result?.output_epub_filename ?? '출력 파일';
+                    showMessage(`✅ 번역 완료 (${outputName})`, 'success');
+                    refreshUploadedFiles();
+                });
+            })
+            .catch(error => {
+                showMessage(`❌ 통신 에러: ${error}`, 'error');
+            });
         });
 
         loadProviderAndModels();
