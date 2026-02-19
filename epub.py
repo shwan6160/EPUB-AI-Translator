@@ -374,8 +374,7 @@ def translate_xhtml(
 
 
 def translate_epub(
-    epub_path: Path,
-    workspace: Path,
+    epub: "Epub",
     translate_fn: Callable[[str, str], str],
     target_lang: str = "ko",
     max_chars: int = 8000,
@@ -384,22 +383,20 @@ def translate_epub(
     """
     EPUB 파일 전체를 번역합니다.
     
-    extract_epub()으로 추출 후, 각 XHTML 파일에 translate_xhtml()을 적용하고
+    이미 추출된 Epub 객체를 받아 각 XHTML 파일에 translate_xhtml()을 적용하고
     번역 결과를 추출 디렉토리에 덮어씁니다.
     max_workers > 1이면 XHTML 파일을 병렬로 번역합니다.
     
-    :param epub_path: 원본 EPUB 파일 경로
-    :param workspace: 작업 디렉토리
+    :param epub: 추출이 완료된 Epub 객체
     :param translate_fn: def translation(text_chunk: str, prev_context: str) -> str
     :param target_lang: 대상 언어 코드
     :param max_chars: 번역기 1회 호출 당 최대 글자 수
     :param max_workers: 병렬 처리 워커 수 (기본 10)
     :returns: 번역된 EPUB이 추출된 디렉토리 경로
     """
-    data = extract_epub(epub_path, workspace)
-    output_dir: Path = data["output_dir"]
-    opf_dir: Path = data["opf_dir"]
-    xhtml_files: list[element.Tag] = data["xhtml_files"]
+    output_dir: Path = epub.output_dir
+    opf_dir: Path = epub.opf_dir
+    xhtml_files: list[element.Tag] = epub.xhtml_files
 
     # 유효한 XHTML 경로 목록 수집
     xhtml_paths: list[Path] = []
@@ -602,16 +599,18 @@ def trim_ruby_text(text: str) -> str:
     
     return ruby_pattern.sub(replace_ruby, text)
 
-def text_from_epub(output_dir: Path, ordered_xhtml_files: list[element.Tag], opf_dir: Path = Path('.')) -> str:
+def text_from_epub(epub: Epub) -> str:
     """
     EPUB에서 추출한 xhtml 파일 목록에서 전체 텍스트를 추출합니다.
     태그를 무시하고 body의 텍스트만 합쳐서 반환합니다.
     
-    :param output_dir: EPUB 추출 디렉토리
-    :param ordered_xhtml_files: 정렬된 xhtml item Tag 리스트
-    :param opf_dir: OPF 파일의 zip 내 상위 디렉토리 (href 해석 기준)
+    :param epub: Epub 객체
     :returns: 추출된 전체 텍스트
     """
+    output_dir = epub.output_dir
+    ordered_xhtml_files = epub.xhtml_files
+    opf_dir = epub.opf_dir
+
     full_text = ""
 
     for item in ordered_xhtml_files:
@@ -639,3 +638,11 @@ def text_from_epub(output_dir: Path, ordered_xhtml_files: list[element.Tag], opf
     
     return full_text.strip()
 
+class Epub():
+    def __init__(self, epub_path: Path, workspace: Path):
+        self.path = epub_path
+
+        _data = extract_epub(epub_path, workspace)
+        self.output_dir: Path = _data["output_dir"]
+        self.opf_dir: Path = _data["opf_dir"]
+        self.xhtml_files: list[element.Tag] = _data["xhtml_files"]

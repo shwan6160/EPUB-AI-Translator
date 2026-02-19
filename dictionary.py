@@ -12,12 +12,8 @@ dotenv.load_dotenv(".env")
 # 공용 함수
 # --------------------------------
 
-def load_full_text_from_epub(epub_extracted: dict) -> str:
-    full_text = text_from_epub(
-        output_dir=epub_extracted["output_dir"],
-        ordered_xhtml_files=epub_extracted["xhtml_files"],
-        opf_dir=epub_extracted["opf_dir"],
-    )
+def load_full_text_from_epub(epub_extracted: Epub) -> str:
+    full_text = text_from_epub(epub_extracted)
     full_text = trim_ruby_text(full_text)
     if not full_text.strip():
         raise ValueError("EPUB에서 추출한 텍스트가 비어 있습니다.")
