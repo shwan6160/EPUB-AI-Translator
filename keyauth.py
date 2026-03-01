@@ -1,11 +1,31 @@
 import os
 
 import keyring
-from keyring_pass import PasswordStoreBackend
 
 from settings import APP_NAME
 
-keyring.set_keyring(PasswordStoreBackend())
+
+def _setup_keyring() -> None:
+    """환경에 따라 적절한 keyring 백엔드를 선택합니다.
+
+    우선순위:
+    1. KEYRING_BACKEND 환경변수로 강제 지정 ("pass" 또는 "system")
+    2. GUI 세션 감지 (DISPLAY / WAYLAND_DISPLAY) → 시스템 기본 백엔드
+    3. headless → pass 백엔드
+    """
+    forced = os.environ.get("KEYRING_BACKEND", "").lower()
+
+    if forced == "pass" or (not forced and not _is_gui_session()):
+        from keyring_pass import PasswordStoreBackend
+        keyring.set_keyring(PasswordStoreBackend())
+
+
+def _is_gui_session() -> bool:
+    """X11 또는 Wayland 세션이 활성화되어 있는지 확인합니다."""
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+_setup_keyring()
 
 keyname_list = [
     "GEMINI_KEY",
