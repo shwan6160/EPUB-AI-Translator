@@ -1,4 +1,5 @@
 import os
+import sys
 
 import keyring
 
@@ -6,13 +7,19 @@ from settings import APP_NAME
 
 
 def _setup_keyring() -> None:
-    """환경에 따라 적절한 keyring 백엔드를 선택합니다.
+    """환경에 따라 적절한 keyring 백엔드를 선택
 
-    우선순위:
-    1. KEYRING_BACKEND 환경변수로 강제 지정 ("pass" 또는 "system")
-    2. GUI 세션 감지 (DISPLAY / WAYLAND_DISPLAY) → 시스템 기본 백엔드
-    3. headless → pass 백엔드
+    - Windows  : Windows Credential Manager (keyring 자동 선택)
+    - macOS    : macOS Keychain (keyring 자동 선택)
+    - Linux    : GUI 세션(DISPLAY / WAYLAND_DISPLAY) → SecretService / KWallet
+                 headless / CLI → pass 백엔드
+    KEYRING_BACKEND 환경변수로 강제 지정 가능: "pass" 또는 "system"
     """
+    if sys.platform in ("win32", "darwin"):
+        # Windows / macOS: keyring이 자동으로 백엔드 설정
+        return
+
+    # Linux
     forced = os.environ.get("KEYRING_BACKEND", "").lower()
 
     if forced == "pass" or (not forced and not _is_gui_session()):
@@ -21,7 +28,7 @@ def _setup_keyring() -> None:
 
 
 def _is_gui_session() -> bool:
-    """X11 또는 Wayland 세션이 활성화되어 있는지 확인합니다."""
+    """X11 또는 Wayland 세션이 활성화되어 있는지 확인 (Linux)"""
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
