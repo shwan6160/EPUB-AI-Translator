@@ -337,3 +337,63 @@ body {
         max-height: 100%;
     }
 }
+
+/* === Save Indicator === */
+
+.save-indicator {
+    font-size: 12px;
+    font-weight: normal;
+    margin-left: 8px;
+    transition: color 0.3s;
+}
+
+.save-indicator.saved {
+    color: #2e7d32;
+}
+
+.save-indicator.unsaved {
+    color: #e65100;
+    animation: pulse-unsaved 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-unsaved {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* === JSON Editing === */
+
+.json-primitive:hover {
+    outline: 1px dashed #90caf9;
+    cursor: text;
+}
+
+.json-primitive.editing {
+    padding: 0;
+    background: none;
+    outline: none;
+}
+
+.json-primitive.editing:hover {
+    outline: none;
+}
+
+.json-primitive.edited {
+    border-left: 3px solid #ff9800;
+}
+
+.json-edit-input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 2px solid #42a5f5;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    resize: vertical;
+    outline: none;
+    background: #fff;
+    min-height: 24px;
+    overflow: hidden;
+}

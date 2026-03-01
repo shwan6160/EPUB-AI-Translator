@@ -90,6 +90,11 @@ class TranslationRunRequest(BaseModel):
     max_workers: int = 10
 
 
+class CharacterDictSaveRequest(BaseModel):
+    epub_filename: str
+    content: dict | list
+
+
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -279,6 +284,23 @@ def get_character_dictionary(epub_filename: str):
         "dictionary_filename": dictionary_path.name,
         "content": content,
     }
+
+
+@app.put("/character-dictionary")
+def save_character_dictionary(request: CharacterDictSaveRequest):
+    safe_epub_filename = Path(request.epub_filename).name
+    if not safe_epub_filename.lower().endswith(".epub"):
+        return {"status": "error", "message": "유효한 EPUB 파일명이 아닙니다."}
+
+    dictionary_path = get_character_dictionary_path(safe_epub_filename)
+
+    try:
+        with dictionary_path.open("w", encoding="utf-8") as file:
+            json.dump(request.content, file, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return {"status": "error", "message": f"저장 실패: {e}"}
+
+    return {"status": "success", "message": "저장 완료"}
 
 
 @app.post("/run/character-dictionary")

@@ -33,7 +33,7 @@
 
         <main class="main-panel">
             <section class="json-viewer">
-                <h2>character_dictionary.json 내용</h2>
+                <h2>character_dictionary.json 내용 <span id="save-indicator" class="save-indicator"></span></h2>
                 <div id="json-content">
                     <p class="json-message">오른쪽에서 파일을 선택하면 character_dictionary.json 내용이 여기에 표시됩니다.</p>
                 </div>
@@ -86,6 +86,7 @@
         const resultMsg = document.getElementById('result-msg');
         const uploadedFiles = document.getElementById('uploaded-files');
         const jsonContent = document.getElementById('json-content');
+        const saveIndicator = document.getElementById('save-indicator');
         const dictProviderSelect = document.getElementById('dict-provider');
         const dictModelSelect = document.getElementById('dict-model');
         const translateProviderSelect = document.getElementById('translate-provider');
@@ -97,6 +98,11 @@
         let selectedFilename = null;
         let activeTaskId = null;
         let taskPollTimer = null;
+        let currentJsonData = null;
+        let isDirty = false;
+        let autoSaveTimer = null;
+        const AUTO_SAVE_INTERVAL = 5000;
+        const LS_PREFIX = 'erst-edit-';
 
         function setSelectOptions(selectElement, values, placeholder) {
             selectElement.innerHTML = '';
@@ -177,13 +183,21 @@
             const dataType = value === null ? 'null' : typeof value;
             valueNode.className = `json-primitive type-${dataType}`;
             valueNode.dataset.path = path;
+            valueNode.dataset.originalType = dataType;
+            valueNode.title = '더블클릭하여 편집';
 
             if (value === null) {
                 valueNode.textContent = 'null';
-                return valueNode;
+            } else {
+                valueNode.textContent = String(value);
             }
 
-            valueNode.textContent = String(value);
+            valueNode.addEventListener('dblclick', (e) => {
+                e.stopPropagation();
+                if (valueNode.classList.contains('editing')) return;
+                startEditing(valueNode, path, valueNode.dataset.originalType);
+            });
+
             return valueNode;
         }
 
@@ -266,10 +280,229 @@
         }
 
         function renderJsonContent(value) {
+            currentJsonData = value;
             jsonContent.innerHTML = '';
             const treeRoot = renderJsonValue(value, 'root');
             treeRoot.classList.add('json-root');
             jsonContent.appendChild(treeRoot);
+        }
+
+        // === JSON Editing Utilities ===
+
+        function parsePath(pathStr) {
+            const parts = pathStr.split('.');
+            if (parts[0] === 'root') parts.shift();
+            return parts.map(p => /^\d+$/.test(p) ? parseInt(p, 10) : p);
+        }
+
+        function setNestedValue(data, pathStr, newValue) {
+            const parts = parsePath(pathStr);
+            let current = data;
+            for (let i = 0; i < parts.length - 1; i++) {
+                current = current[parts[i]];
+                if (current == null) return;
+            }
+            current[parts[parts.length - 1]] = newValue;
+        }
+
+        function parseEditedValue(text, originalType) {
+            if (text === 'null') return null;
+            if (originalType === 'number') {
+                const num = Number(text);
+                return isNaN(num) ? text : num;
+            }
+            if (originalType === 'boolean') {
+                if (text.toLowerCase() === 'true') return true;
+                if (text.toLowerCase() === 'false') return false;
+                return text;
+            }
+            return text;
+        }
+
+        function startEditing(node, path, dataType) {
+            const originalText = node.textContent;
+            node.textContent = '';
+            node.classList.add('editing');
+
+            const input = document.createElement('textarea');
+            input.className = 'json-edit-input';
+            input.value = originalText === 'null' ? '' : originalText;
+            node.appendChild(input);
+
+            function autoResize() {
+                input.style.height = 'auto';
+                input.style.height = Math.max(24, input.scrollHeight) + 'px';
+            }
+            input.addEventListener('input', autoResize);
+            requestAnimationFrame(() => {
+                autoResize();
+                input.focus();
+                input.select();
+            });
+
+            let committed = false;
+
+            function commitEdit() {
+                if (committed) return;
+                committed = true;
+
+                const newText = input.value;
+                const newValue = parseEditedValue(newText, dataType);
+                const newType = newValue === null ? 'null' : typeof newValue;
+
+                node.className = `json-primitive type-${newType}`;
+                node.dataset.originalType = newType;
+                node.classList.remove('editing');
+                node.textContent = newValue === null ? 'null' : String(newValue);
+                node.title = '더블클릭하여 편집';
+
+                if (String(newValue) !== originalText) {
+                    setNestedValue(currentJsonData, path, newValue);
+                    node.classList.add('edited');
+                    markDirty();
+                }
+            }
+
+            function cancelEdit() {
+                if (committed) return;
+                committed = true;
+                node.classList.remove('editing');
+                node.textContent = originalText;
+            }
+
+            input.addEventListener('blur', () => commitEdit());
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelEdit();
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    input.blur();
+                }
+            });
+        }
+
+        // === Save State Management ===
+
+        function getLsKey() {
+            return LS_PREFIX + (selectedFilename || '');
+        }
+
+        function saveToLocalStorage() {
+            if (!selectedFilename || !currentJsonData) return;
+            try {
+                localStorage.setItem(getLsKey(), JSON.stringify(currentJsonData));
+            } catch (e) {
+                console.warn('localStorage 저장 실패:', e);
+            }
+        }
+
+        function loadFromLocalStorage() {
+            if (!selectedFilename) return null;
+            try {
+                const stored = localStorage.getItem(getLsKey());
+                return stored ? JSON.parse(stored) : null;
+            } catch {
+                return null;
+            }
+        }
+
+        function clearLocalStorage() {
+            if (!selectedFilename) return;
+            try {
+                localStorage.removeItem(getLsKey());
+            } catch {}
+        }
+
+        function markDirty() {
+            isDirty = true;
+            saveToLocalStorage();
+            updateSaveIndicator();
+        }
+
+        function markClean() {
+            isDirty = false;
+            clearLocalStorage();
+            updateSaveIndicator();
+        }
+
+        function updateSaveIndicator() {
+            if (!selectedFilename || !currentJsonData) {
+                saveIndicator.textContent = '';
+                saveIndicator.className = 'save-indicator';
+                return;
+            }
+            if (isDirty) {
+                saveIndicator.textContent = '● 미저장';
+                saveIndicator.className = 'save-indicator unsaved';
+            } else {
+                saveIndicator.textContent = '✓ 저장됨';
+                saveIndicator.className = 'save-indicator saved';
+            }
+        }
+
+        function startAutoSave() {
+            stopAutoSave();
+            autoSaveTimer = setInterval(() => {
+                if (isDirty && selectedFilename && currentJsonData) {
+                    saveToServer();
+                }
+            }, AUTO_SAVE_INTERVAL);
+        }
+
+        function stopAutoSave() {
+            if (autoSaveTimer) {
+                clearInterval(autoSaveTimer);
+                autoSaveTimer = null;
+            }
+        }
+
+        function saveToServer() {
+            if (!selectedFilename || !currentJsonData) return;
+            const filename = selectedFilename;
+            const lsKey = getLsKey();
+
+            fetch('/character-dictionary', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    epub_filename: filename,
+                    content: currentJsonData
+                })
+            })
+            .then(response => parseJsonResponse(response))
+            .then(data => {
+                if (data.status === 'success' && selectedFilename === filename) {
+                    markClean();
+                } else if (data.status === 'success') {
+                    try { localStorage.removeItem(lsKey); } catch {}
+                }
+            })
+            .catch(error => {
+                console.error('자동 저장 실패:', error);
+            });
+        }
+
+        function flushAndReset() {
+            if (isDirty && currentJsonData && selectedFilename) {
+                const body = JSON.stringify({
+                    epub_filename: selectedFilename,
+                    content: currentJsonData
+                });
+                const lsKey = getLsKey();
+                fetch('/character-dictionary', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: body
+                }).then(() => {
+                    try { localStorage.removeItem(lsKey); } catch {}
+                }).catch(() => {});
+            }
+            stopAutoSave();
+            currentJsonData = null;
+            isDirty = false;
+            updateSaveIndicator();
         }
 
         async function parseJsonResponse(response) {
@@ -485,11 +718,14 @@
             }
 
             if (selectedFilename === filename) {
+                flushAndReset();
                 itemElement.classList.remove('selected');
                 selectedFilename = null;
                 showJsonMessage('선택이 해제되었습니다. 파일을 선택하면 character_dictionary.json 내용이 표시됩니다.');
                 return;
             }
+
+            flushAndReset();
 
             uploadedFiles.querySelectorAll('.file-item.selected').forEach((element) => {
                 element.classList.remove('selected');
@@ -517,7 +753,17 @@
                         return;
                     }
 
-                    renderJsonContent(data.content);
+                    const cached = loadFromLocalStorage();
+                    if (cached) {
+                        renderJsonContent(cached);
+                        isDirty = true;
+                        updateSaveIndicator();
+                    } else {
+                        renderJsonContent(data.content);
+                        isDirty = false;
+                        updateSaveIndicator();
+                    }
+                    startAutoSave();
                 })
                 .catch((error) => {
                     if (selectedFilename !== filename) {
@@ -581,6 +827,10 @@
                                 return;
                             }
                             renderJsonContent(dictData.content);
+                            clearLocalStorage();
+                            isDirty = false;
+                            updateSaveIndicator();
+                            startAutoSave();
                         })
                         .catch((error) => {
                             showJsonMessage(`통신 오류: ${error}`, 'error');
@@ -637,6 +887,21 @@
             .catch(error => {
                 showMessage(`❌ 통신 에러: ${error}`, 'error');
             });
+        });
+
+        // Ctrl+S manual save
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                if (isDirty) saveToServer();
+            }
+        });
+
+        // Warn before page unload if unsaved
+        window.addEventListener('beforeunload', (e) => {
+            if (isDirty) {
+                e.preventDefault();
+            }
         });
 
         loadProviderAndModels();
