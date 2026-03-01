@@ -5,6 +5,8 @@ VENV_DIR = $(INSTALL_DIR)/.venv
 
 .PHONY: install uninstall
 
+reinstall: uninstall install
+
 install:
 	@echo "Installing $(APP_NAME)..."
 	mkdir -p $(INSTALL_DIR)
